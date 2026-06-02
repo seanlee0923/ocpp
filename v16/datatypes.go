@@ -43,9 +43,9 @@ type ChargingSchedule struct {
 }
 
 type ChargingSchedulePeriod struct {
-	StartPeriod  *int    `json:"startPeriod" validate:"required"`
-	Limit        float32 `json:"limit" validate:"required,gte=0"`
-	NumberPhases int     `json:"numberPhases,omitempty"`
+	StartPeriod  *int     `json:"startPeriod" validate:"required"`
+	Limit        *float32 `json:"limit" validate:"required,gte=0"`
+	NumberPhases int      `json:"numberPhases,omitempty"`
 }
 
 type AuthorizationData struct {
