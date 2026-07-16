@@ -128,6 +128,23 @@ payload.SchemaName()
 err := payload.Validate()
 ```
 
+## 문서
+
+- [시작하기](docs/getting-started.md)
+- [구조와 책임 범위](docs/architecture.md)
+- [Inbound handler](docs/handlers.md)
+- [Outbound CALL](docs/outbound-calls.md)
+- [세션과 연결 생명주기](docs/sessions.md)
+- [인증과 TLS](docs/security.md)
+- [검증과 오류 처리](docs/validation-and-errors.md)
+- [OCPP 1.6](docs/ocpp16.md)
+- [OCPP 2.0.1](docs/ocpp201.md)
+- [OCPP 2.1](docs/ocpp21.md)
+- [운영 환경 구성](docs/production.md)
+
+컴파일 가능한 작은 예제는 [`examples`](examples)에 있습니다. DB, cache, queue와 업무
+규칙은 애플리케이션 handler에서 연결하며 이 라이브러리는 특정 인프라를 강제하지 않습니다.
+
 네트워크 입력은 Go 타입으로 decode하기 전에 생성된 Go 검증 코드를 거칩니다. 따라서
 unknown property, required, enum, 길이, 범위와 format 제약도 검사합니다. 공식 JSON
 Schema 원본이나 코드 생성 도구는 라이브러리 배포 파일에 포함하지 않습니다.
@@ -468,7 +485,7 @@ handler 오류 문자열은 전달하지 않습니다. logger가 panic해도 프
 
 ## 로드맵
 
-- 공개 라이브러리 API/module path/GoDoc/examples 마감
+- 문서와 버전별·운영 예제 마감
 - GitHub Actions와 release 준비
 - 마지막 단계의 opt-in metrics, snapshot, tracing
 - 유료 OCA OCTT와 공식 인증은 release 이후 선택적으로 수행
