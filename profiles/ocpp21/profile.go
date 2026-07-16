@@ -1,0 +1,176 @@
+// Package ocpp21 implements the server-side OCPP 2.1 Core registration flow.
+package ocpp21
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"sync"
+	"sync/atomic"
+
+	"ocpp-go/csms"
+	"ocpp-go/protocol"
+	"ocpp-go/v21"
+)
+
+var ErrNotBooted = errors.New("OCPP 2.1 session has not completed an accepted BootNotification")
+
+type RegistrationState uint32
+
+const (
+	RegistrationUnknown RegistrationState = iota
+	RegistrationAccepted
+	RegistrationPending
+	RegistrationRejected
+)
+
+type BootNotificationHandler func(context.Context, *csms.Session, v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error)
+type HeartbeatHandler func(context.Context, *csms.Session, v21.HeartbeatRequest) (v21.HeartbeatConfirmation, error)
+type StatusNotificationHandler func(context.Context, *csms.Session, v21.StatusNotificationRequest) (v21.StatusNotificationConfirmation, error)
+type AuthorizeHandler func(context.Context, *csms.Session, v21.AuthorizeRequest) (v21.AuthorizeConfirmation, error)
+type TransactionEventHandler func(context.Context, *csms.Session, v21.TransactionEventRequest) (v21.TransactionEventConfirmation, error)
+type MeterValuesHandler func(context.Context, *csms.Session, v21.MeterValuesRequest) (v21.MeterValuesConfirmation, error)
+type NotifyReportHandler func(context.Context, *csms.Session, v21.NotifyReportRequest) (v21.NotifyReportConfirmation, error)
+
+type sessionState struct{ registration atomic.Uint32 }
+
+type Profile struct {
+	router *csms.Router
+	states sync.Map // map[*csms.Session]*sessionState
+}
+
+func NewProfile(router *csms.Router) (*Profile, error) {
+	if router == nil {
+		return nil, errors.New("router is nil")
+	}
+	profile := &Profile{router: router}
+	router.Use(profile.registrationMiddleware)
+	return profile, nil
+}
+
+func (profile *Profile) HandleBootNotification(handler BootNotificationHandler) error {
+	if handler == nil {
+		return errors.New("BootNotification handler is nil")
+	}
+	return csms.Handle(profile.router, func(ctx context.Context, session *csms.Session, request v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error) {
+		confirmation, err := handler(ctx, session, request)
+		if err != nil {
+			return confirmation, err
+		}
+		if err := confirmation.Validate(); err != nil {
+			return confirmation, err
+		}
+		state := profile.stateFor(session)
+		switch confirmation.Status {
+		case v21.BootNotificationConfirmationRegistrationStatusEnumAccepted:
+			state.registration.Store(uint32(RegistrationAccepted))
+		case v21.BootNotificationConfirmationRegistrationStatusEnumPending:
+			state.registration.Store(uint32(RegistrationPending))
+		case v21.BootNotificationConfirmationRegistrationStatusEnumRejected:
+			state.registration.Store(uint32(RegistrationRejected))
+		}
+		return confirmation, nil
+	})
+}
+
+func (profile *Profile) HandleHeartbeat(handler HeartbeatHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.HeartbeatRequest, v21.HeartbeatConfirmation](handler))
+}
+func (profile *Profile) HandleStatusNotification(handler StatusNotificationHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.StatusNotificationRequest, v21.StatusNotificationConfirmation](handler))
+}
+func (profile *Profile) HandleAuthorize(handler AuthorizeHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.AuthorizeRequest, v21.AuthorizeConfirmation](handler))
+}
+func (profile *Profile) HandleTransactionEvent(handler TransactionEventHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.TransactionEventRequest, v21.TransactionEventConfirmation](handler))
+}
+func (profile *Profile) HandleMeterValues(handler MeterValuesHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.MeterValuesRequest, v21.MeterValuesConfirmation](handler))
+}
+func (profile *Profile) HandleNotifyReport(handler NotifyReportHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyReportRequest, v21.NotifyReportConfirmation](handler))
+}
+
+func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.GetVariablesConfirmation{}, err
+	}
+	return csms.Call[v21.GetVariablesRequest, v21.GetVariablesConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallSetVariables(ctx context.Context, session *csms.Session, request v21.SetVariablesRequest) (v21.SetVariablesConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.SetVariablesConfirmation{}, err
+	}
+	return csms.Call[v21.SetVariablesRequest, v21.SetVariablesConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallGetBaseReport(ctx context.Context, session *csms.Session, request v21.GetBaseReportRequest) (v21.GetBaseReportConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.GetBaseReportConfirmation{}, err
+	}
+	return csms.Call[v21.GetBaseReportRequest, v21.GetBaseReportConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallRequestStartTransaction(ctx context.Context, session *csms.Session, request v21.RequestStartTransactionRequest) (v21.RequestStartTransactionConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.RequestStartTransactionConfirmation{}, err
+	}
+	return csms.Call[v21.RequestStartTransactionRequest, v21.RequestStartTransactionConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallRequestStopTransaction(ctx context.Context, session *csms.Session, request v21.RequestStopTransactionRequest) (v21.RequestStopTransactionConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.RequestStopTransactionConfirmation{}, err
+	}
+	return csms.Call[v21.RequestStopTransactionRequest, v21.RequestStopTransactionConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallReset(ctx context.Context, session *csms.Session, request v21.ResetRequest) (v21.ResetConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.ResetConfirmation{}, err
+	}
+	return csms.Call[v21.ResetRequest, v21.ResetConfirmation](ctx, session, request)
+}
+
+func (profile *Profile) requireBooted(session *csms.Session) error {
+	if !profile.IsBooted(session) {
+		return ErrNotBooted
+	}
+	return nil
+}
+
+func (profile *Profile) State(session *csms.Session) RegistrationState {
+	if session == nil {
+		return RegistrationUnknown
+	}
+	value, ok := profile.states.Load(session)
+	if !ok {
+		return RegistrationUnknown
+	}
+	return RegistrationState(value.(*sessionState).registration.Load())
+}
+func (profile *Profile) IsBooted(session *csms.Session) bool {
+	return profile.State(session) == RegistrationAccepted
+}
+
+func (profile *Profile) stateFor(session *csms.Session) *sessionState {
+	state := &sessionState{}
+	actual, loaded := profile.states.LoadOrStore(session, state)
+	if loaded {
+		return actual.(*sessionState)
+	}
+	go func() {
+		<-session.Done()
+		profile.states.Delete(session)
+	}()
+	return state
+}
+
+func (profile *Profile) registrationMiddleware(version protocol.Version, action string, next csms.Handler) csms.Handler {
+	if version != protocol.OCPP21 || action == "BootNotification" {
+		return next
+	}
+	return func(ctx context.Context, session *csms.Session, payload json.RawMessage) (any, error) {
+		if !profile.IsBooted(session) {
+			return nil, &csms.CallError{Code: csms.ProtocolError, Description: "charging station has not completed BootNotification", Details: map[string]any{}}
+		}
+		return next(ctx, session, payload)
+	}
+}
