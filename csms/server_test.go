@@ -47,6 +47,34 @@ func TestServerNegotiatesAndRoutes(t *testing.T) {
 	}
 }
 
+func TestServerRejectsSendOnPre21Connections(t *testing.T) {
+	for _, version := range []protocol.Version{protocol.OCPP16, protocol.OCPP201} {
+		t.Run(string(version), func(t *testing.T) {
+			server, err := New(Config{Versions: []protocol.Version{version}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			httpServer := httptest.NewServer(server)
+			defer httpServer.Close()
+			conn := dialTestStation(t, httpServer.URL, version)
+			defer conn.Close()
+			data, err := protocol.Encode(protocol.Send{ID: "send-1", Action: "NotifyPeriodicEventStream", Payload: json.RawMessage(`{}`)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := conn.ReadMessage(); err == nil {
+				t.Fatal("pre-2.1 connection remained open after SEND")
+			}
+		})
+	}
+}
+
 func TestServerRejectsDuplicateSessionByDefault(t *testing.T) {
 	server, err := New(Config{Versions: []protocol.Version{protocol.OCPP16}})
 	if err != nil {
