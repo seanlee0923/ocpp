@@ -1,0 +1,59 @@
+// Code generated from the official OCPP JSON Schema. DO NOT EDIT.
+
+package v21
+
+import (
+	"ocpp-go/internal/validation"
+	"ocpp-go/protocol"
+)
+
+var _ protocol.Payload = ChangeTransactionTariffConfirmation{}
+
+var schemaChangeTransactionTariffConfirmation = &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"status": &validation.Schema{Type: "string", Enum: []string{"Accepted", "Rejected", "TooManyElements", "ConditionNotSupported", "TxNotFound", "NoCurrencyChange"}}, "statusInfo": &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"reasonCode": &validation.Schema{Type: "string", AllowAdditional: true, MaxLength: 20, HasMaxLength: true}, "additionalInfo": &validation.Schema{Type: "string", AllowAdditional: true, MaxLength: 1024, HasMaxLength: true}, "customData": &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"vendorId": &validation.Schema{Type: "string", AllowAdditional: true, MaxLength: 255, HasMaxLength: true}}, Required: []string{"vendorId"}, AllowAdditional: true}}, Required: []string{"reasonCode"}}, "customData": &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"vendorId": &validation.Schema{Type: "string", AllowAdditional: true, MaxLength: 255, HasMaxLength: true}}, Required: []string{"vendorId"}, AllowAdditional: true}}, Required: []string{"status"}}
+
+type ChangeTransactionTariffConfirmation struct {
+	Status     ChangeTransactionTariffConfirmationTariffChangeStatusEnum `json:"status"`
+	StatusInfo *ChangeTransactionTariffConfirmationStatusInfo            `json:"statusInfo,omitempty"`
+	CustomData *ChangeTransactionTariffConfirmationCustomData            `json:"customData,omitempty"`
+}
+
+type ChangeTransactionTariffConfirmationStatusInfo struct {
+	ReasonCode     string                                         `json:"reasonCode"`
+	AdditionalInfo *string                                        `json:"additionalInfo,omitempty"`
+	CustomData     *ChangeTransactionTariffConfirmationCustomData `json:"customData,omitempty"`
+}
+
+type ChangeTransactionTariffConfirmationCustomData struct {
+	VendorID string `json:"vendorId"`
+}
+
+type ChangeTransactionTariffConfirmationTariffChangeStatusEnum string
+
+const (
+	ChangeTransactionTariffConfirmationTariffChangeStatusEnumAccepted              ChangeTransactionTariffConfirmationTariffChangeStatusEnum = "Accepted"
+	ChangeTransactionTariffConfirmationTariffChangeStatusEnumRejected              ChangeTransactionTariffConfirmationTariffChangeStatusEnum = "Rejected"
+	ChangeTransactionTariffConfirmationTariffChangeStatusEnumTooManyElements       ChangeTransactionTariffConfirmationTariffChangeStatusEnum = "TooManyElements"
+	ChangeTransactionTariffConfirmationTariffChangeStatusEnumConditionNotSupported ChangeTransactionTariffConfirmationTariffChangeStatusEnum = "ConditionNotSupported"
+	ChangeTransactionTariffConfirmationTariffChangeStatusEnumTxNotFound            ChangeTransactionTariffConfirmationTariffChangeStatusEnum = "TxNotFound"
+	ChangeTransactionTariffConfirmationTariffChangeStatusEnumNoCurrencyChange      ChangeTransactionTariffConfirmationTariffChangeStatusEnum = "NoCurrencyChange"
+)
+
+func (ChangeTransactionTariffConfirmation) ActionName() string { return "ChangeTransactionTariff" }
+
+func (ChangeTransactionTariffConfirmation) Version() protocol.Version { return protocol.OCPP21 }
+
+func (ChangeTransactionTariffConfirmation) Direction() protocol.PayloadDirection {
+	return protocol.ConfirmationPayload
+}
+
+func (ChangeTransactionTariffConfirmation) SchemaName() string {
+	return "ChangeTransactionTariffResponse.json"
+}
+
+func (message ChangeTransactionTariffConfirmation) Validate() error {
+	return validation.Validate("ChangeTransactionTariffResponse.json", schemaChangeTransactionTariffConfirmation, message)
+}
+
+func (ChangeTransactionTariffConfirmation) ValidateJSON(data []byte) error {
+	return validation.ValidateJSON("ChangeTransactionTariffResponse.json", schemaChangeTransactionTariffConfirmation, data)
+}

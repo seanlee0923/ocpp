@@ -1,0 +1,41 @@
+// Code generated from the official OCPP JSON Schema. DO NOT EDIT.
+
+package v201
+
+import (
+	"ocpp-go/internal/validation"
+	"ocpp-go/protocol"
+)
+
+var _ protocol.Payload = ClearVariableMonitoringRequest{}
+
+var schemaClearVariableMonitoringRequest = &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"customData": &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"vendorId": &validation.Schema{Type: "string", AllowAdditional: true, MaxLength: 255, HasMaxLength: true}}, Required: []string{"vendorId"}, AllowAdditional: true}, "id": &validation.Schema{Type: "array", AllowAdditional: true, Items: &validation.Schema{Type: "integer", AllowAdditional: true}, MinItems: 1, HasMinItems: true}}, Required: []string{"id"}}
+
+type ClearVariableMonitoringRequest struct {
+	CustomData *ClearVariableMonitoringRequestCustomData `json:"customData,omitempty"`
+	ID         []int                                     `json:"id"`
+}
+
+type ClearVariableMonitoringRequestCustomData struct {
+	VendorID string `json:"vendorId"`
+}
+
+func (ClearVariableMonitoringRequest) ActionName() string { return "ClearVariableMonitoring" }
+
+func (ClearVariableMonitoringRequest) Version() protocol.Version { return protocol.OCPP201 }
+
+func (ClearVariableMonitoringRequest) Direction() protocol.PayloadDirection {
+	return protocol.RequestPayload
+}
+
+func (ClearVariableMonitoringRequest) SchemaName() string {
+	return "ClearVariableMonitoringRequest.json"
+}
+
+func (message ClearVariableMonitoringRequest) Validate() error {
+	return validation.Validate("ClearVariableMonitoringRequest.json", schemaClearVariableMonitoringRequest, message)
+}
+
+func (ClearVariableMonitoringRequest) ValidateJSON(data []byte) error {
+	return validation.ValidateJSON("ClearVariableMonitoringRequest.json", schemaClearVariableMonitoringRequest, data)
+}

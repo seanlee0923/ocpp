@@ -1,0 +1,21 @@
+# IDE and editor settings
+.idea/
+.vscode/
+*.swp
+
+# Local development context
+context.md
+
+# OS metadata
+.DS_Store
+
+# Go build and test output
+bin/
+*.test
+*.out
+coverage/
+coverage.out
+
+# Local environment files
+.env
+.env.*

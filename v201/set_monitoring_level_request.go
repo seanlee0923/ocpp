@@ -1,0 +1,39 @@
+// Code generated from the official OCPP JSON Schema. DO NOT EDIT.
+
+package v201
+
+import (
+	"ocpp-go/internal/validation"
+	"ocpp-go/protocol"
+)
+
+var _ protocol.Payload = SetMonitoringLevelRequest{}
+
+var schemaSetMonitoringLevelRequest = &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"customData": &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"vendorId": &validation.Schema{Type: "string", AllowAdditional: true, MaxLength: 255, HasMaxLength: true}}, Required: []string{"vendorId"}, AllowAdditional: true}, "severity": &validation.Schema{Type: "integer", AllowAdditional: true}}, Required: []string{"severity"}}
+
+type SetMonitoringLevelRequest struct {
+	CustomData *SetMonitoringLevelRequestCustomData `json:"customData,omitempty"`
+	Severity   int                                  `json:"severity"`
+}
+
+type SetMonitoringLevelRequestCustomData struct {
+	VendorID string `json:"vendorId"`
+}
+
+func (SetMonitoringLevelRequest) ActionName() string { return "SetMonitoringLevel" }
+
+func (SetMonitoringLevelRequest) Version() protocol.Version { return protocol.OCPP201 }
+
+func (SetMonitoringLevelRequest) Direction() protocol.PayloadDirection {
+	return protocol.RequestPayload
+}
+
+func (SetMonitoringLevelRequest) SchemaName() string { return "SetMonitoringLevelRequest.json" }
+
+func (message SetMonitoringLevelRequest) Validate() error {
+	return validation.Validate("SetMonitoringLevelRequest.json", schemaSetMonitoringLevelRequest, message)
+}
+
+func (SetMonitoringLevelRequest) ValidateJSON(data []byte) error {
+	return validation.ValidateJSON("SetMonitoringLevelRequest.json", schemaSetMonitoringLevelRequest, data)
+}

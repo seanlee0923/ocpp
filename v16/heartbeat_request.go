@@ -1,0 +1,31 @@
+// Code generated from the official OCPP JSON Schema. DO NOT EDIT.
+
+package v16
+
+import (
+	"ocpp-go/internal/validation"
+	"ocpp-go/protocol"
+)
+
+var _ protocol.Payload = HeartbeatRequest{}
+
+var schemaHeartbeatRequest = &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{}}
+
+type HeartbeatRequest struct {
+}
+
+func (HeartbeatRequest) ActionName() string { return "Heartbeat" }
+
+func (HeartbeatRequest) Version() protocol.Version { return protocol.OCPP16 }
+
+func (HeartbeatRequest) Direction() protocol.PayloadDirection { return protocol.RequestPayload }
+
+func (HeartbeatRequest) SchemaName() string { return "Heartbeat.json" }
+
+func (message HeartbeatRequest) Validate() error {
+	return validation.Validate("Heartbeat.json", schemaHeartbeatRequest, message)
+}
+
+func (HeartbeatRequest) ValidateJSON(data []byte) error {
+	return validation.ValidateJSON("Heartbeat.json", schemaHeartbeatRequest, data)
+}

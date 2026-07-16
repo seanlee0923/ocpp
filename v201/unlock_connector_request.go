@@ -1,0 +1,38 @@
+// Code generated from the official OCPP JSON Schema. DO NOT EDIT.
+
+package v201
+
+import (
+	"ocpp-go/internal/validation"
+	"ocpp-go/protocol"
+)
+
+var _ protocol.Payload = UnlockConnectorRequest{}
+
+var schemaUnlockConnectorRequest = &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"customData": &validation.Schema{Type: "object", Properties: map[string]*validation.Schema{"vendorId": &validation.Schema{Type: "string", AllowAdditional: true, MaxLength: 255, HasMaxLength: true}}, Required: []string{"vendorId"}, AllowAdditional: true}, "evseId": &validation.Schema{Type: "integer", AllowAdditional: true}, "connectorId": &validation.Schema{Type: "integer", AllowAdditional: true}}, Required: []string{"evseId", "connectorId"}}
+
+type UnlockConnectorRequest struct {
+	CustomData  *UnlockConnectorRequestCustomData `json:"customData,omitempty"`
+	EVSEID      int                               `json:"evseId"`
+	ConnectorID int                               `json:"connectorId"`
+}
+
+type UnlockConnectorRequestCustomData struct {
+	VendorID string `json:"vendorId"`
+}
+
+func (UnlockConnectorRequest) ActionName() string { return "UnlockConnector" }
+
+func (UnlockConnectorRequest) Version() protocol.Version { return protocol.OCPP201 }
+
+func (UnlockConnectorRequest) Direction() protocol.PayloadDirection { return protocol.RequestPayload }
+
+func (UnlockConnectorRequest) SchemaName() string { return "UnlockConnectorRequest.json" }
+
+func (message UnlockConnectorRequest) Validate() error {
+	return validation.Validate("UnlockConnectorRequest.json", schemaUnlockConnectorRequest, message)
+}
+
+func (UnlockConnectorRequest) ValidateJSON(data []byte) error {
+	return validation.ValidateJSON("UnlockConnectorRequest.json", schemaUnlockConnectorRequest, data)
+}
