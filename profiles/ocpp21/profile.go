@@ -31,6 +31,12 @@ type AuthorizeHandler func(context.Context, *csms.Session, v21.AuthorizeRequest)
 type TransactionEventHandler func(context.Context, *csms.Session, v21.TransactionEventRequest) (v21.TransactionEventConfirmation, error)
 type MeterValuesHandler func(context.Context, *csms.Session, v21.MeterValuesRequest) (v21.MeterValuesConfirmation, error)
 type NotifyReportHandler func(context.Context, *csms.Session, v21.NotifyReportRequest) (v21.NotifyReportConfirmation, error)
+type NotifyEVChargingNeedsHandler func(context.Context, *csms.Session, v21.NotifyEVChargingNeedsRequest) (v21.NotifyEVChargingNeedsConfirmation, error)
+type NotifyEVChargingScheduleHandler func(context.Context, *csms.Session, v21.NotifyEVChargingScheduleRequest) (v21.NotifyEVChargingScheduleConfirmation, error)
+type NotifyAllowedEnergyTransferHandler func(context.Context, *csms.Session, v21.NotifyAllowedEnergyTransferRequest) (v21.NotifyAllowedEnergyTransferConfirmation, error)
+type NotifyChargingLimitHandler func(context.Context, *csms.Session, v21.NotifyChargingLimitRequest) (v21.NotifyChargingLimitConfirmation, error)
+type ClearedChargingLimitHandler func(context.Context, *csms.Session, v21.ClearedChargingLimitRequest) (v21.ClearedChargingLimitConfirmation, error)
+type ReportChargingProfilesHandler func(context.Context, *csms.Session, v21.ReportChargingProfilesRequest) (v21.ReportChargingProfilesConfirmation, error)
 
 type sessionState struct{ registration atomic.Uint32 }
 
@@ -91,6 +97,24 @@ func (profile *Profile) HandleMeterValues(handler MeterValuesHandler) error {
 func (profile *Profile) HandleNotifyReport(handler NotifyReportHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyReportRequest, v21.NotifyReportConfirmation](handler))
 }
+func (profile *Profile) HandleNotifyEVChargingNeeds(handler NotifyEVChargingNeedsHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyEVChargingNeedsRequest, v21.NotifyEVChargingNeedsConfirmation](handler))
+}
+func (profile *Profile) HandleNotifyEVChargingSchedule(handler NotifyEVChargingScheduleHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyEVChargingScheduleRequest, v21.NotifyEVChargingScheduleConfirmation](handler))
+}
+func (profile *Profile) HandleNotifyAllowedEnergyTransfer(handler NotifyAllowedEnergyTransferHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyAllowedEnergyTransferRequest, v21.NotifyAllowedEnergyTransferConfirmation](handler))
+}
+func (profile *Profile) HandleNotifyChargingLimit(handler NotifyChargingLimitHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyChargingLimitRequest, v21.NotifyChargingLimitConfirmation](handler))
+}
+func (profile *Profile) HandleClearedChargingLimit(handler ClearedChargingLimitHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.ClearedChargingLimitRequest, v21.ClearedChargingLimitConfirmation](handler))
+}
+func (profile *Profile) HandleReportChargingProfiles(handler ReportChargingProfilesHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.ReportChargingProfilesRequest, v21.ReportChargingProfilesConfirmation](handler))
+}
 
 func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {
 	if err := profile.requireBooted(session); err != nil {
@@ -127,6 +151,24 @@ func (profile *Profile) CallReset(ctx context.Context, session *csms.Session, re
 		return v21.ResetConfirmation{}, err
 	}
 	return csms.Call[v21.ResetRequest, v21.ResetConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallGetChargingProfiles(ctx context.Context, session *csms.Session, request v21.GetChargingProfilesRequest) (v21.GetChargingProfilesConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.GetChargingProfilesConfirmation{}, err
+	}
+	return csms.Call[v21.GetChargingProfilesRequest, v21.GetChargingProfilesConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallSetChargingProfile(ctx context.Context, session *csms.Session, request v21.SetChargingProfileRequest) (v21.SetChargingProfileConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.SetChargingProfileConfirmation{}, err
+	}
+	return csms.Call[v21.SetChargingProfileRequest, v21.SetChargingProfileConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallClearChargingProfile(ctx context.Context, session *csms.Session, request v21.ClearChargingProfileRequest) (v21.ClearChargingProfileConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.ClearChargingProfileConfirmation{}, err
+	}
+	return csms.Call[v21.ClearChargingProfileRequest, v21.ClearChargingProfileConfirmation](ctx, session, request)
 }
 
 func (profile *Profile) requireBooted(session *csms.Session) error {

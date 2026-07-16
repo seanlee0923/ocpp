@@ -101,7 +101,7 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var transactions, reports atomic.Int32
+	var transactions, reports, clearedLimits atomic.Int32
 	if err := profile.HandleBootNotification(func(context.Context, *csms.Session, v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error) {
 		return v21.BootNotificationConfirmation{CurrentTime: "2026-07-16T00:00:00Z", Interval: 300, Status: v21.BootNotificationConfirmationRegistrationStatusEnumAccepted}, nil
 	}); err != nil {
@@ -119,6 +119,15 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	if err := profile.HandleNotifyReport(func(context.Context, *csms.Session, v21.NotifyReportRequest) (v21.NotifyReportConfirmation, error) {
 		reports.Add(1)
 		return v21.NotifyReportConfirmation{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.HandleClearedChargingLimit(func(_ context.Context, _ *csms.Session, request v21.ClearedChargingLimitRequest) (v21.ClearedChargingLimitConfirmation, error) {
+		if request.ChargingLimitSource != "CSO" {
+			t.Errorf("charging limit source = %q", request.ChargingLimitSource)
+		}
+		clearedLimits.Add(1)
+		return v21.ClearedChargingLimitConfirmation{}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -168,6 +177,10 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
 		t.Fatalf("NotifyReport response type = %d", response.Type())
 	}
+	sendCall(t, conn, "cleared-limit", v21.ClearedChargingLimitRequest{ChargingLimitSource: "CSO"})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("ClearedChargingLimit response type = %d", response.Type())
+	}
 
 	variableResult := make(chan v21.GetVariablesConfirmation, 1)
 	variableError := make(chan error, 1)
@@ -199,8 +212,36 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for GetVariables confirmation")
 	}
-	if transactions.Load() != 3 || reports.Load() != 1 {
-		t.Fatalf("transactions=%d reports=%d", transactions.Load(), reports.Load())
+
+	profilesResult := make(chan v21.GetChargingProfilesConfirmation, 1)
+	profilesError := make(chan error, 1)
+	go func() {
+		confirmation, err := profile.CallGetChargingProfiles(context.Background(), session, v21.GetChargingProfilesRequest{
+			RequestID: 22, ChargingProfile: v21.GetChargingProfilesRequestChargingProfileCriterion{},
+		})
+		if err != nil {
+			profilesError <- err
+			return
+		}
+		profilesResult <- confirmation
+	}()
+	outbound = readMessage(t, conn).(protocol.Call)
+	if outbound.Action != "GetChargingProfiles" {
+		t.Fatalf("outbound action = %q", outbound.Action)
+	}
+	sendCallResult(t, conn, outbound.ID, v21.GetChargingProfilesConfirmation{Status: v21.GetChargingProfilesConfirmationGetChargingProfileStatusEnumNoProfiles})
+	select {
+	case err := <-profilesError:
+		t.Fatal(err)
+	case confirmation := <-profilesResult:
+		if confirmation.Status != v21.GetChargingProfilesConfirmationGetChargingProfileStatusEnumNoProfiles {
+			t.Fatalf("status = %q", confirmation.Status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for GetChargingProfiles confirmation")
+	}
+	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 {
+		t.Fatalf("transactions=%d reports=%d clearedLimits=%d", transactions.Load(), reports.Load(), clearedLimits.Load())
 	}
 }
 
