@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"ocpp-go/protocol"
+	"github.com/seanlee0923/ocpp/protocol"
 )
 
 func TestSessionPingPongUpdatesInfo(t *testing.T) {

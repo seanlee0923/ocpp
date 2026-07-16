@@ -8,7 +8,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"ocpp-go/protocol"
+	"github.com/seanlee0923/ocpp/protocol"
 )
 
 var ErrHandlerAlreadyRegistered = errors.New("OCPP handler is already registered")

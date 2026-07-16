@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,8 +15,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"ocpp-go/protocol"
-	"ocpp-go/v16"
+	"github.com/seanlee0923/ocpp/protocol"
+	"github.com/seanlee0923/ocpp/v16"
 )
 
 func TestBoundedConcurrentInboundCallLoad(t *testing.T) {
@@ -153,6 +154,9 @@ func TestSessionSoak(t *testing.T) {
 		t.Fatalf("invalid OCPP_SOAK_DURATION %q", durationText)
 	}
 	const stationCount = 8
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
 	var handled atomic.Int64
 	router := NewRouter()
 	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *Session, json.RawMessage) (any, error) {
@@ -215,7 +219,18 @@ func TestSessionSoak(t *testing.T) {
 	if handled.Load() == 0 {
 		t.Fatal("soak test handled no calls")
 	}
-	t.Logf("handled %d calls across %d sessions in %s", handled.Load(), stationCount, duration)
+	deadline := time.Now().Add(2 * time.Second)
+	for server.SessionCount() != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	t.Logf(
+		"handled %d calls across %d sessions in %s; heap_alloc before=%d after=%d; heap_objects before=%d after=%d; goroutines=%d",
+		handled.Load(), stationCount, duration, before.HeapAlloc, after.HeapAlloc,
+		before.HeapObjects, after.HeapObjects, runtime.NumGoroutine(),
+	)
 }
 
 func pendingCallCount(session *Session) int {

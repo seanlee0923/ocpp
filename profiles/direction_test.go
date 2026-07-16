@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"ocpp-go/profiles/ocpp16"
-	"ocpp-go/profiles/ocpp201"
-	"ocpp-go/profiles/ocpp21"
+	"github.com/seanlee0923/ocpp/profiles/ocpp16"
+	"github.com/seanlee0923/ocpp/profiles/ocpp201"
+	"github.com/seanlee0923/ocpp/profiles/ocpp21"
 )
 
 // This inventory follows the request initiator defined by the official OCA

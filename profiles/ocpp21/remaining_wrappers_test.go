@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"ocpp-go/csms"
-	"ocpp-go/protocol"
-	"ocpp-go/v21"
+	"github.com/seanlee0923/ocpp/csms"
+	"github.com/seanlee0923/ocpp/protocol"
+	"github.com/seanlee0923/ocpp/v21"
 )
 
 func TestRemainingSmartChargingWrapperRoundTrips(t *testing.T) {
@@ -183,6 +183,36 @@ func TestRemainingPaymentCertificateAndFirmwareWrapperRoundTrips(t *testing.T) {
 	assertOutboundRoundTrip(t, conn, "UnpublishFirmware", func() (v21.UnpublishFirmwareConfirmation, error) {
 		return profile.CallUnpublishFirmware(context.Background(), session, v21.UnpublishFirmwareRequest{Checksum: "sha256"})
 	}, v21.UnpublishFirmwareConfirmation{Status: v21.UnpublishFirmwareConfirmationUnpublishFirmwareStatusEnumUnpublished})
+}
+
+func TestProfileRegistrationStateIsReleasedAfterDisconnect(t *testing.T) {
+	router := csms.NewRouter()
+	profile, err := NewProfile(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerAcceptedBoot(t, profile)
+	server, conn := startBootedProfile(t, router, profile, "CP-21-state-release")
+	session := mustSession(t, server, "CP-21-state-release")
+	if _, ok := profile.states.Load(session); !ok {
+		t.Fatal("registration state was not created")
+	}
+	if err := conn.UnderlyingConn().Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-session.Done():
+	case <-time.After(time.Second):
+		t.Fatal("session did not close")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := profile.states.Load(session); !ok {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("profile registration state retained the closed session")
 }
 
 func registerAcceptedBoot(t *testing.T, profile *Profile) {

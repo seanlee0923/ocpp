@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"ocpp-go/protocol"
+	"github.com/seanlee0923/ocpp/protocol"
 )
 
 func TestNewRequiresAuthenticatorForSecuredProfiles(t *testing.T) {

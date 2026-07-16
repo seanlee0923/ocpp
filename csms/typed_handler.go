@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"ocpp-go/internal/validation"
-	"ocpp-go/protocol"
+	"github.com/seanlee0923/ocpp/internal/validation"
+	"github.com/seanlee0923/ocpp/protocol"
 )
 
 // TypedHandler receives a schema-validated request and returns a confirmation

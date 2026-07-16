@@ -8,7 +8,7 @@ import (
 	"io"
 	"unicode/utf8"
 
-	"ocpp-go/internal/validation"
+	"github.com/seanlee0923/ocpp/internal/validation"
 )
 
 // IsValidationError reports whether err is a generated OCPP payload

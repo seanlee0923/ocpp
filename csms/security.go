@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"ocpp-go/protocol"
+	"github.com/seanlee0923/ocpp/protocol"
 )
 
 type SecurityProfile uint8

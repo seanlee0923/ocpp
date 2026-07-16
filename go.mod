@@ -1,4 +1,4 @@
-module ocpp-go
+module github.com/seanlee0923/ocpp
 
 go 1.26.4
 

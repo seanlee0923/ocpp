@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"ocpp-go/protocol"
-	"ocpp-go/v16"
-	"ocpp-go/v201"
+	"github.com/seanlee0923/ocpp/protocol"
+	"github.com/seanlee0923/ocpp/v16"
+	"github.com/seanlee0923/ocpp/v201"
 )
 
 func TestServerNegotiatesAndRoutes(t *testing.T) {

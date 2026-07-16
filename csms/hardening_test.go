@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"ocpp-go/protocol"
-	"ocpp-go/v16"
+	"github.com/seanlee0923/ocpp/protocol"
+	"github.com/seanlee0923/ocpp/v16"
 )
 
 func TestOnConnectCanPerformBlockingCall(t *testing.T) {

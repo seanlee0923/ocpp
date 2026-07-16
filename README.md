@@ -4,8 +4,7 @@ Go로 작성된 OCPP-J CSMS WebSocket 서버 라이브러리입니다. 하나의
 OCPP 1.6, 2.0.1, 2.1을 처리하며 공식 JSON Schema 기반 메시지 타입과 타입 안전
 라우팅을 제공합니다.
 
-> 현재 개발 단계의 모듈 경로는 임시 값인 `ocpp-go`입니다. 공개 Go 모듈로 사용하기
-> 전에 `github.com/seanlee0923/ocpp`로 변경할 예정입니다.
+모듈 경로는 `github.com/seanlee0923/ocpp`입니다.
 
 ## 주요 기능
 
@@ -54,10 +53,10 @@ import (
     "net/http"
     "time"
 
-    "ocpp-go/csms"
-    "ocpp-go/profiles/ocpp16"
-    "ocpp-go/protocol"
-    "ocpp-go/v16"
+    "github.com/seanlee0923/ocpp/csms"
+    "github.com/seanlee0923/ocpp/profiles/ocpp16"
+    "github.com/seanlee0923/ocpp/protocol"
+    "github.com/seanlee0923/ocpp/v16"
 )
 
 func main() {
@@ -108,9 +107,9 @@ Sec-WebSocket-Protocol: ocpp1.6
 
 ```go
 import (
-    "ocpp-go/v16"
-    "ocpp-go/v201"
-    "ocpp-go/v21"
+    "github.com/seanlee0923/ocpp/v16"
+    "github.com/seanlee0923/ocpp/v201"
+    "github.com/seanlee0923/ocpp/v21"
 )
 ```
 
@@ -410,7 +409,9 @@ GOCACHE=/tmp/ocpp-go-build-cache go test -race ./...
 WebSocket 통합 테스트는 로컬 loopback port를 사용합니다.
 
 일반 suite에는 16개 세션에서 총 800개 CALL을 처리하는 bounded load와 concurrent
-outbound pending-call 상한 테스트가 포함됩니다. 장시간 soak는 opt-in입니다.
+outbound pending-call 상한 테스트가 포함됩니다. 반복적인 비정상 연결 종료 뒤 세션,
+pending call, read loop, profile 상태와 goroutine이 해제되는 회귀 테스트도 포함됩니다.
+장시간 soak는 opt-in이며 종료 전후 heap/goroutine 통계를 로그로 남깁니다.
 
 ```sh
 OCPP_SOAK_DURATION=30m GOCACHE=/tmp/ocpp-go-build-cache go test -race \

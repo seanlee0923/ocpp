@@ -3,7 +3,7 @@ package csms
 import (
 	"context"
 
-	"ocpp-go/protocol"
+	"github.com/seanlee0923/ocpp/protocol"
 )
 
 type LogLevel uint8

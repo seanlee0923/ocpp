@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"ocpp-go/protocol"
+	"github.com/seanlee0923/ocpp/protocol"
 )
 
 // RemoteCallError is a CALLERROR returned by a Charging Station.

@@ -3,10 +3,10 @@ package protocol_test
 import (
 	"testing"
 
-	"ocpp-go/protocol"
-	"ocpp-go/v16"
-	"ocpp-go/v201"
-	"ocpp-go/v21"
+	"github.com/seanlee0923/ocpp/protocol"
+	"github.com/seanlee0923/ocpp/v16"
+	"github.com/seanlee0923/ocpp/v201"
+	"github.com/seanlee0923/ocpp/v21"
 )
 
 func FuzzDecode(f *testing.F) {

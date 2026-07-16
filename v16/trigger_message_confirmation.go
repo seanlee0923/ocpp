@@ -3,8 +3,8 @@
 package v16
 
 import (
-	"ocpp-go/internal/validation"
-	"ocpp-go/protocol"
+	"github.com/seanlee0923/ocpp/internal/validation"
+	"github.com/seanlee0923/ocpp/protocol"
 )
 
 var _ protocol.Payload = TriggerMessageConfirmation{}

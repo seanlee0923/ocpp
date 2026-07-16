@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"ocpp-go/csms"
-	"ocpp-go/protocol"
-	"ocpp-go/v201"
+	"github.com/seanlee0923/ocpp/csms"
+	"github.com/seanlee0923/ocpp/protocol"
+	"github.com/seanlee0923/ocpp/v201"
 )
 
 func TestRegistrationGateAndResetRoundTrip(t *testing.T) {

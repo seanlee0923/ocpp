@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"ocpp-go/csms"
-	"ocpp-go/protocol"
-	"ocpp-go/v201"
+	"github.com/seanlee0923/ocpp/csms"
+	"github.com/seanlee0923/ocpp/protocol"
+	"github.com/seanlee0923/ocpp/v201"
 )
 
 var ErrNotBooted = errors.New("OCPP 2.0.1 session has not completed an accepted BootNotification")
