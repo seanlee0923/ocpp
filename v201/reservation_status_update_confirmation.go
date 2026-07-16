@@ -3,6 +3,9 @@
 package v201
 
 import (
+	"encoding/json"
+
+	"github.com/seanlee0923/ocpp/internal/customdata"
 	"github.com/seanlee0923/ocpp/internal/validation"
 	"github.com/seanlee0923/ocpp/protocol"
 )
@@ -16,7 +19,16 @@ type ReservationStatusUpdateConfirmation struct {
 }
 
 type ReservationStatusUpdateConfirmationCustomData struct {
-	VendorID string `json:"vendorId"`
+	VendorID string                     `json:"vendorId"`
+	Extra    map[string]json.RawMessage `json:"-"`
+}
+
+func (value ReservationStatusUpdateConfirmationCustomData) MarshalJSON() ([]byte, error) {
+	return customdata.Marshal(value.VendorID, value.Extra)
+}
+
+func (value *ReservationStatusUpdateConfirmationCustomData) UnmarshalJSON(data []byte) error {
+	return customdata.Unmarshal(data, &value.VendorID, &value.Extra)
 }
 
 func (ReservationStatusUpdateConfirmation) ActionName() string { return "ReservationStatusUpdate" }

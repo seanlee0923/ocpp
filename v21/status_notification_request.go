@@ -3,6 +3,9 @@
 package v21
 
 import (
+	"encoding/json"
+
+	"github.com/seanlee0923/ocpp/internal/customdata"
 	"github.com/seanlee0923/ocpp/internal/validation"
 	"github.com/seanlee0923/ocpp/protocol"
 )
@@ -20,7 +23,16 @@ type StatusNotificationRequest struct {
 }
 
 type StatusNotificationRequestCustomData struct {
-	VendorID string `json:"vendorId"`
+	VendorID string                     `json:"vendorId"`
+	Extra    map[string]json.RawMessage `json:"-"`
+}
+
+func (value StatusNotificationRequestCustomData) MarshalJSON() ([]byte, error) {
+	return customdata.Marshal(value.VendorID, value.Extra)
+}
+
+func (value *StatusNotificationRequestCustomData) UnmarshalJSON(data []byte) error {
+	return customdata.Unmarshal(data, &value.VendorID, &value.Extra)
 }
 
 type StatusNotificationRequestConnectorStatusEnum string

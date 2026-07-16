@@ -3,6 +3,9 @@
 package v21
 
 import (
+	"encoding/json"
+
+	"github.com/seanlee0923/ocpp/internal/customdata"
 	"github.com/seanlee0923/ocpp/internal/validation"
 	"github.com/seanlee0923/ocpp/protocol"
 )
@@ -25,7 +28,16 @@ type ClearChargingProfileRequestClearChargingProfile struct {
 }
 
 type ClearChargingProfileRequestCustomData struct {
-	VendorID string `json:"vendorId"`
+	VendorID string                     `json:"vendorId"`
+	Extra    map[string]json.RawMessage `json:"-"`
+}
+
+func (value ClearChargingProfileRequestCustomData) MarshalJSON() ([]byte, error) {
+	return customdata.Marshal(value.VendorID, value.Extra)
+}
+
+func (value *ClearChargingProfileRequestCustomData) UnmarshalJSON(data []byte) error {
+	return customdata.Unmarshal(data, &value.VendorID, &value.Extra)
 }
 
 type ClearChargingProfileRequestChargingProfilePurposeEnum string

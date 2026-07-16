@@ -3,6 +3,9 @@
 package v21
 
 import (
+	"encoding/json"
+
+	"github.com/seanlee0923/ocpp/internal/customdata"
 	"github.com/seanlee0923/ocpp/internal/validation"
 	"github.com/seanlee0923/ocpp/protocol"
 )
@@ -16,7 +19,16 @@ type NotifyCustomerInformationConfirmation struct {
 }
 
 type NotifyCustomerInformationConfirmationCustomData struct {
-	VendorID string `json:"vendorId"`
+	VendorID string                     `json:"vendorId"`
+	Extra    map[string]json.RawMessage `json:"-"`
+}
+
+func (value NotifyCustomerInformationConfirmationCustomData) MarshalJSON() ([]byte, error) {
+	return customdata.Marshal(value.VendorID, value.Extra)
+}
+
+func (value *NotifyCustomerInformationConfirmationCustomData) UnmarshalJSON(data []byte) error {
+	return customdata.Unmarshal(data, &value.VendorID, &value.Extra)
 }
 
 func (NotifyCustomerInformationConfirmation) ActionName() string { return "NotifyCustomerInformation" }

@@ -3,6 +3,9 @@
 package v21
 
 import (
+	"encoding/json"
+
+	"github.com/seanlee0923/ocpp/internal/customdata"
 	"github.com/seanlee0923/ocpp/internal/validation"
 	"github.com/seanlee0923/ocpp/protocol"
 )
@@ -17,7 +20,16 @@ type GetInstalledCertificateIdsRequest struct {
 }
 
 type GetInstalledCertificateIdsRequestCustomData struct {
-	VendorID string `json:"vendorId"`
+	VendorID string                     `json:"vendorId"`
+	Extra    map[string]json.RawMessage `json:"-"`
+}
+
+func (value GetInstalledCertificateIdsRequestCustomData) MarshalJSON() ([]byte, error) {
+	return customdata.Marshal(value.VendorID, value.Extra)
+}
+
+func (value *GetInstalledCertificateIdsRequestCustomData) UnmarshalJSON(data []byte) error {
+	return customdata.Unmarshal(data, &value.VendorID, &value.Extra)
 }
 
 type GetInstalledCertificateIdsRequestGetCertificateIDUseEnum string
