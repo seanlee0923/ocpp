@@ -72,6 +72,7 @@ type Config struct {
 	CheckOrigin           func(*http.Request) bool
 	OnConnect             func(*Session)
 	OnDisconnect          func(*Session, error)
+	Logger                Logger
 	Security              SecurityConfig
 }
 
@@ -265,12 +266,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.config.OnConnect != nil {
 		s.config.OnConnect(session)
 	}
+	s.log(session.Context(), sessionLogRecord(session, LogInfo, LogSessionConnected))
 	err = <-readResult
 	_ = session.closeWithError(err)
 	s.unregisterSession(session)
 	if s.config.OnDisconnect != nil {
 		s.config.OnDisconnect(session, err)
 	}
+	record := sessionLogRecord(session, LogInfo, LogSessionDisconnected)
+	record.Reason = disconnectReason(err)
+	s.log(context.Background(), record)
 }
 
 func (s *Server) Session(identity string) (*Session, bool) {
@@ -484,24 +489,46 @@ func (s *Server) readLoop(session *Session) error {
 }
 
 func (s *Server) handleSend(ctx context.Context, session *Session, send protocol.Send) {
+	record := sessionLogRecord(session, LogDebug, LogSendReceived)
+	record.MessageType, record.MessageID, record.Action = protocol.SendType, send.ID, send.Action
+	s.log(ctx, record)
 	handler, ok := s.config.Router.lookup(session.version, send.Action)
 	if !ok {
+		record.Level, record.Event, record.Reason = LogWarn, LogSendDropped, "action_not_registered"
+		s.log(ctx, record)
 		return
 	}
 	// OCPP 2.1 SEND is unconfirmed. Handler and validation failures are
 	// intentionally not converted to CALLRESULT or CALLERROR.
-	_, _ = handler(ctx, session, send.Payload)
+	if _, err := handler(ctx, session, send.Payload); err != nil {
+		record.Level, record.Event, record.Reason = LogWarn, LogSendDropped, "handler_or_validation_error"
+		s.log(ctx, record)
+		return
+	}
+	record.Level, record.Event, record.Reason = LogDebug, LogSendCompleted, ""
+	s.log(ctx, record)
 }
 
 func (s *Server) handleCall(ctx context.Context, session *Session, call protocol.Call) {
+	record := sessionLogRecord(session, LogDebug, LogCallReceived)
+	record.MessageType, record.MessageID, record.Action = protocol.CallType, call.ID, call.Action
+	s.log(ctx, record)
 	handler, ok := s.config.Router.lookup(session.version, call.Action)
 	if !ok {
+		record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, NotImplemented, "action_not_registered"
+		s.log(ctx, record)
 		_ = session.Send(ctx, protocol.CallError{ID: call.ID, Code: string(NotImplemented), Description: "action is not registered"})
 		return
 	}
 	response, err := handler(ctx, session, call.Payload)
 	if err == nil {
-		_ = session.result(ctx, call.ID, response)
+		if err := session.result(ctx, call.ID, response); err != nil {
+			record.Level, record.Event, record.ErrorCode, record.Reason = LogError, LogCallRejected, InternalError, "response_write_failed"
+			s.log(ctx, record)
+			return
+		}
+		record.Level, record.Event = LogDebug, LogCallCompleted
+		s.log(ctx, record)
 		return
 	}
 	callError := &CallError{Code: InternalError, Description: "internal error", Details: map[string]any{}}
@@ -516,7 +543,26 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 	if marshalErr != nil {
 		raw = []byte(`{}`)
 	}
+	record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, callError.Code, "handler_error"
+	s.log(ctx, record)
 	_ = session.Send(ctx, protocol.CallError{ID: call.ID, Code: string(callError.Code), Description: callError.Description, Details: raw})
+}
+
+func disconnectReason(err error) string {
+	switch {
+	case errors.Is(err, ErrSessionReplaced):
+		return "session_replaced"
+	case errors.Is(err, ErrServerShutdown):
+		return "server_shutdown"
+	case errors.Is(err, ErrPongTimeout):
+		return "pong_timeout"
+	case errors.Is(err, ErrIdleTimeout):
+		return "idle_timeout"
+	case err == nil:
+		return "closed"
+	default:
+		return "connection_error"
+	}
 }
 
 func hasSupportedSubprotocol(r *http.Request, supported []protocol.Version) bool {

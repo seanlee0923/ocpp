@@ -397,6 +397,24 @@ GOCACHE=/tmp/ocpp-go-build-cache go test -race ./...
 
 WebSocket 통합 테스트는 로컬 loopback port를 사용합니다.
 
+## 구조화 로그
+
+특정 로깅 라이브러리 의존 없이 `csms.Logger`를 주입할 수 있습니다.
+
+```go
+server, err := csms.New(csms.Config{
+    Router: router,
+    Logger: csms.LoggerFunc(func(ctx context.Context, record csms.LogRecord) {
+        // slog, zap, zerolog 등 애플리케이션 logger로 전달합니다.
+    }),
+})
+```
+
+기본 로그 레코드는 identity, OCPP version, message type, message ID, Action, error code와
+정규화된 reason만 제공합니다. payload, Authorization header, 인증서 내용, idToken 및
+handler 오류 문자열은 전달하지 않습니다. logger가 panic해도 프로토콜 서버는 계속
+동작합니다.
+
 ## 로드맵
 
 - OCPP 2.0.1 Core Profile
