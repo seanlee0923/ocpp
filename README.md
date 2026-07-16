@@ -409,6 +409,14 @@ GOCACHE=/tmp/ocpp-go-build-cache go test -race ./...
 
 WebSocket 통합 테스트는 로컬 loopback port를 사용합니다.
 
+일반 suite에는 16개 세션에서 총 800개 CALL을 처리하는 bounded load와 concurrent
+outbound pending-call 상한 테스트가 포함됩니다. 장시간 soak는 opt-in입니다.
+
+```sh
+OCPP_SOAK_DURATION=30m GOCACHE=/tmp/ocpp-go-build-cache go test -race \
+  -run '^TestSessionSoak$' ./csms
+```
+
 ## 구조화 로그
 
 특정 로깅 라이브러리 의존 없이 `csms.Logger`를 주입할 수 있습니다.
@@ -429,8 +437,8 @@ handler 오류 문자열은 전달하지 않습니다. logger가 panic해도 프
 
 ## 로드맵
 
-- OCPP 2.0.1 Core Profile
-- OCPP 2.1 Core 및 확장 Profile
-- 구조화 로그, metrics, tracing
-- OCA OCTT 적합성 검증
+- 공개 라이브러리 API/module path/GoDoc/examples 마감
+- GitHub Actions와 release 준비
+- 마지막 단계의 opt-in metrics, snapshot, tracing
+- 유료 OCA OCTT와 공식 인증은 release 이후 선택적으로 수행
 - Charging Station 클라이언트
