@@ -101,7 +101,7 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var transactions, reports, clearedLimits, schedulePulls, derStarts atomic.Int32
+	var transactions, reports, clearedLimits, schedulePulls, derStarts, tariffGets atomic.Int32
 	if err := profile.HandleBootNotification(func(context.Context, *csms.Session, v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error) {
 		return v21.BootNotificationConfirmation{CurrentTime: "2026-07-16T00:00:00Z", Interval: 300, Status: v21.BootNotificationConfirmationRegistrationStatusEnumAccepted}, nil
 	}); err != nil {
@@ -146,6 +146,15 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 		}
 		derStarts.Add(1)
 		return v21.NotifyDERStartStopConfirmation{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.HandleGetTariffs(func(_ context.Context, _ *csms.Session, request v21.GetTariffsRequest) (v21.GetTariffsConfirmation, error) {
+		if request.EVSEID != 1 {
+			t.Errorf("EVSE ID = %d", request.EVSEID)
+		}
+		tariffGets.Add(1)
+		return v21.GetTariffsConfirmation{Status: v21.GetTariffsConfirmationTariffGetStatusEnumNoTariff}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +215,10 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	sendCall(t, conn, "der-start", v21.NotifyDERStartStopRequest{ControlID: "DER-21", Started: true, Timestamp: "2026-07-16T00:02:30Z"})
 	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
 		t.Fatalf("NotifyDERStartStop response type = %d", response.Type())
+	}
+	sendCall(t, conn, "get-tariffs", v21.GetTariffsRequest{EVSEID: 1})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("GetTariffs response type = %d", response.Type())
 	}
 
 	variableResult := make(chan v21.GetVariablesConfirmation, 1)
@@ -318,8 +331,31 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for ClearDERControl confirmation")
 	}
-	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 {
-		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load())
+
+	costResult := make(chan v21.CostUpdatedConfirmation, 1)
+	costError := make(chan error, 1)
+	go func() {
+		confirmation, err := profile.CallCostUpdated(context.Background(), session, v21.CostUpdatedRequest{TotalCost: 12.5, TransactionID: "TX-21"})
+		if err != nil {
+			costError <- err
+			return
+		}
+		costResult <- confirmation
+	}()
+	outbound = readMessage(t, conn).(protocol.Call)
+	if outbound.Action != "CostUpdated" {
+		t.Fatalf("outbound action = %q", outbound.Action)
+	}
+	sendCallResult(t, conn, outbound.ID, v21.CostUpdatedConfirmation{})
+	select {
+	case err := <-costError:
+		t.Fatal(err)
+	case <-costResult:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for CostUpdated confirmation")
+	}
+	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 || tariffGets.Load() != 1 {
+		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d tariffGets=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load(), tariffGets.Load())
 	}
 }
 

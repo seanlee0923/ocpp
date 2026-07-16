@@ -42,6 +42,10 @@ type PullDynamicScheduleUpdateHandler func(context.Context, *csms.Session, v21.P
 type ReportDERControlHandler func(context.Context, *csms.Session, v21.ReportDERControlRequest) (v21.ReportDERControlConfirmation, error)
 type NotifyDERAlarmHandler func(context.Context, *csms.Session, v21.NotifyDERAlarmRequest) (v21.NotifyDERAlarmConfirmation, error)
 type NotifyDERStartStopHandler func(context.Context, *csms.Session, v21.NotifyDERStartStopRequest) (v21.NotifyDERStartStopConfirmation, error)
+type GetTariffsHandler func(context.Context, *csms.Session, v21.GetTariffsRequest) (v21.GetTariffsConfirmation, error)
+type NotifySettlementHandler func(context.Context, *csms.Session, v21.NotifySettlementRequest) (v21.NotifySettlementConfirmation, error)
+type NotifyWebPaymentStartedHandler func(context.Context, *csms.Session, v21.NotifyWebPaymentStartedRequest) (v21.NotifyWebPaymentStartedConfirmation, error)
+type VatNumberValidationHandler func(context.Context, *csms.Session, v21.VatNumberValidationRequest) (v21.VatNumberValidationConfirmation, error)
 
 type sessionState struct{ registration atomic.Uint32 }
 
@@ -135,6 +139,18 @@ func (profile *Profile) HandleNotifyDERAlarm(handler NotifyDERAlarmHandler) erro
 func (profile *Profile) HandleNotifyDERStartStop(handler NotifyDERStartStopHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyDERStartStopRequest, v21.NotifyDERStartStopConfirmation](handler))
 }
+func (profile *Profile) HandleGetTariffs(handler GetTariffsHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.GetTariffsRequest, v21.GetTariffsConfirmation](handler))
+}
+func (profile *Profile) HandleNotifySettlement(handler NotifySettlementHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifySettlementRequest, v21.NotifySettlementConfirmation](handler))
+}
+func (profile *Profile) HandleNotifyWebPaymentStarted(handler NotifyWebPaymentStartedHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyWebPaymentStartedRequest, v21.NotifyWebPaymentStartedConfirmation](handler))
+}
+func (profile *Profile) HandleVatNumberValidation(handler VatNumberValidationHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.VatNumberValidationRequest, v21.VatNumberValidationConfirmation](handler))
+}
 
 func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {
 	if err := profile.requireBooted(session); err != nil {
@@ -225,6 +241,30 @@ func (profile *Profile) CallClearDERControl(ctx context.Context, session *csms.S
 		return v21.ClearDERControlConfirmation{}, err
 	}
 	return csms.Call[v21.ClearDERControlRequest, v21.ClearDERControlConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallSetDefaultTariff(ctx context.Context, session *csms.Session, request v21.SetDefaultTariffRequest) (v21.SetDefaultTariffConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.SetDefaultTariffConfirmation{}, err
+	}
+	return csms.Call[v21.SetDefaultTariffRequest, v21.SetDefaultTariffConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallClearTariffs(ctx context.Context, session *csms.Session, request v21.ClearTariffsRequest) (v21.ClearTariffsConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.ClearTariffsConfirmation{}, err
+	}
+	return csms.Call[v21.ClearTariffsRequest, v21.ClearTariffsConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallChangeTransactionTariff(ctx context.Context, session *csms.Session, request v21.ChangeTransactionTariffRequest) (v21.ChangeTransactionTariffConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.ChangeTransactionTariffConfirmation{}, err
+	}
+	return csms.Call[v21.ChangeTransactionTariffRequest, v21.ChangeTransactionTariffConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallCostUpdated(ctx context.Context, session *csms.Session, request v21.CostUpdatedRequest) (v21.CostUpdatedConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.CostUpdatedConfirmation{}, err
+	}
+	return csms.Call[v21.CostUpdatedRequest, v21.CostUpdatedConfirmation](ctx, session, request)
 }
 
 func (profile *Profile) requireBooted(session *csms.Session) error {
