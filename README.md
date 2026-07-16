@@ -101,6 +101,9 @@ ws://localhost:8080/CP-001
 Sec-WebSocket-Protocol: ocpp1.6
 ```
 
+같은 코드는 [`examples/ocpp16-csms`](examples/ocpp16-csms)에서 실행 가능한 형태로
+제공합니다.
+
 ## 메시지 타입
 
 버전별 타입은 `req`, `conf` 하위 패키지 없이 단일 패키지에 있습니다.
