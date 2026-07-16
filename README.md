@@ -167,6 +167,9 @@ err := csms.Handle(router, func(
 ```
 
 Request와 Confirmation의 버전, Action, 방향이 다르면 등록 단계에서 거부됩니다.
+같은 `version + action`을 두 번 등록해도 `csms.ErrHandlerAlreadyRegistered` 오류가
+반환되며 기존 handler는 유지됩니다. 실행 중 handler 교체 API는 제공하지 않습니다.
+
 잘못된 request는 원인과 OCPP-J 버전에 따라 constraint CALLERROR로 변환됩니다.
 
 - unknown property, enum, 길이·범위·format: `PropertyConstraintViolation`

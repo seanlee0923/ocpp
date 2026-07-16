@@ -34,7 +34,7 @@ func HandleSend[Request protocol.Payload](router *Router, handler TypedSendHandl
 		return fmt.Errorf("SEND handler requires a non-pointer generated request payload")
 	}
 	version, action := request.Version(), request.ActionName()
-	router.Handle(version, action, func(ctx context.Context, session *Session, raw json.RawMessage) (any, error) {
+	return router.Handle(version, action, func(ctx context.Context, session *Session, raw json.RawMessage) (any, error) {
 		if err := request.ValidateJSON(raw); err != nil {
 			return nil, err
 		}
@@ -44,7 +44,6 @@ func HandleSend[Request protocol.Payload](router *Router, handler TypedSendHandl
 		}
 		return nil, handler(ctx, session, decoded)
 	})
-	return nil
 }
 
 // Handle registers a type-safe OCPP handler. Request and Confirmation must be
@@ -76,7 +75,7 @@ func Handle[Request protocol.Payload, Confirmation protocol.Payload](
 
 	version := request.Version()
 	action := request.ActionName()
-	router.Handle(version, action, func(ctx context.Context, session *Session, raw json.RawMessage) (any, error) {
+	return router.Handle(version, action, func(ctx context.Context, session *Session, raw json.RawMessage) (any, error) {
 		if err := request.ValidateJSON(raw); err != nil {
 			return nil, &CallError{
 				Code:        validationErrorCode(version, err),
@@ -88,7 +87,7 @@ func Handle[Request protocol.Payload, Confirmation protocol.Payload](
 		var decoded Request
 		if err := json.Unmarshal(raw, &decoded); err != nil {
 			return nil, &CallError{
-				Code:        FormationViolation,
+				Code:        formatViolationCode(version),
 				Description: "request payload cannot be decoded",
 				Details:     map[string]any{"error": err.Error()},
 			}
@@ -106,7 +105,6 @@ func Handle[Request protocol.Payload, Confirmation protocol.Payload](
 		}
 		return response, nil
 	})
-	return nil
 }
 
 func validationErrorCode(version protocol.Version, err error) ErrorCode {
