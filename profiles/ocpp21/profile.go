@@ -37,6 +37,8 @@ type NotifyAllowedEnergyTransferHandler func(context.Context, *csms.Session, v21
 type NotifyChargingLimitHandler func(context.Context, *csms.Session, v21.NotifyChargingLimitRequest) (v21.NotifyChargingLimitConfirmation, error)
 type ClearedChargingLimitHandler func(context.Context, *csms.Session, v21.ClearedChargingLimitRequest) (v21.ClearedChargingLimitConfirmation, error)
 type ReportChargingProfilesHandler func(context.Context, *csms.Session, v21.ReportChargingProfilesRequest) (v21.ReportChargingProfilesConfirmation, error)
+type NotifyPriorityChargingHandler func(context.Context, *csms.Session, v21.NotifyPriorityChargingRequest) (v21.NotifyPriorityChargingConfirmation, error)
+type PullDynamicScheduleUpdateHandler func(context.Context, *csms.Session, v21.PullDynamicScheduleUpdateRequest) (v21.PullDynamicScheduleUpdateConfirmation, error)
 
 type sessionState struct{ registration atomic.Uint32 }
 
@@ -115,6 +117,12 @@ func (profile *Profile) HandleClearedChargingLimit(handler ClearedChargingLimitH
 func (profile *Profile) HandleReportChargingProfiles(handler ReportChargingProfilesHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.ReportChargingProfilesRequest, v21.ReportChargingProfilesConfirmation](handler))
 }
+func (profile *Profile) HandleNotifyPriorityCharging(handler NotifyPriorityChargingHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyPriorityChargingRequest, v21.NotifyPriorityChargingConfirmation](handler))
+}
+func (profile *Profile) HandlePullDynamicScheduleUpdate(handler PullDynamicScheduleUpdateHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.PullDynamicScheduleUpdateRequest, v21.PullDynamicScheduleUpdateConfirmation](handler))
+}
 
 func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {
 	if err := profile.requireBooted(session); err != nil {
@@ -169,6 +177,24 @@ func (profile *Profile) CallClearChargingProfile(ctx context.Context, session *c
 		return v21.ClearChargingProfileConfirmation{}, err
 	}
 	return csms.Call[v21.ClearChargingProfileRequest, v21.ClearChargingProfileConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallUsePriorityCharging(ctx context.Context, session *csms.Session, request v21.UsePriorityChargingRequest) (v21.UsePriorityChargingConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.UsePriorityChargingConfirmation{}, err
+	}
+	return csms.Call[v21.UsePriorityChargingRequest, v21.UsePriorityChargingConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallUpdateDynamicSchedule(ctx context.Context, session *csms.Session, request v21.UpdateDynamicScheduleRequest) (v21.UpdateDynamicScheduleConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.UpdateDynamicScheduleConfirmation{}, err
+	}
+	return csms.Call[v21.UpdateDynamicScheduleRequest, v21.UpdateDynamicScheduleConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallAFRRSignal(ctx context.Context, session *csms.Session, request v21.AFRRSignalRequest) (v21.AFRRSignalConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.AFRRSignalConfirmation{}, err
+	}
+	return csms.Call[v21.AFRRSignalRequest, v21.AFRRSignalConfirmation](ctx, session, request)
 }
 
 func (profile *Profile) requireBooted(session *csms.Session) error {
