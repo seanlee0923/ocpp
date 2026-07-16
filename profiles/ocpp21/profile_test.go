@@ -399,6 +399,37 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for RequestBatterySwap confirmation")
 	}
+
+	streamResult := make(chan v21.OpenPeriodicEventStreamConfirmation, 1)
+	streamError := make(chan error, 1)
+	go func() {
+		confirmation, err := profile.CallOpenPeriodicEventStream(context.Background(), session, v21.OpenPeriodicEventStreamRequest{
+			ConstantStreamData: v21.OpenPeriodicEventStreamRequestConstantStreamData{
+				ID: 41, VariableMonitoringID: 410,
+				Params: v21.OpenPeriodicEventStreamRequestPeriodicEventStreamParams{},
+			},
+		})
+		if err != nil {
+			streamError <- err
+			return
+		}
+		streamResult <- confirmation
+	}()
+	outbound = readMessage(t, conn).(protocol.Call)
+	if outbound.Action != "OpenPeriodicEventStream" {
+		t.Fatalf("outbound action = %q", outbound.Action)
+	}
+	sendCallResult(t, conn, outbound.ID, v21.OpenPeriodicEventStreamConfirmation{Status: v21.OpenPeriodicEventStreamConfirmationGenericStatusEnumAccepted})
+	select {
+	case err := <-streamError:
+		t.Fatal(err)
+	case confirmation := <-streamResult:
+		if confirmation.Status != v21.OpenPeriodicEventStreamConfirmationGenericStatusEnumAccepted {
+			t.Fatalf("status = %q", confirmation.Status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for OpenPeriodicEventStream confirmation")
+	}
 	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 || tariffGets.Load() != 1 || batterySwaps.Load() != 1 {
 		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d tariffGets=%d batterySwaps=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load(), tariffGets.Load(), batterySwaps.Load())
 	}

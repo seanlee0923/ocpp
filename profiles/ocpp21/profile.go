@@ -276,6 +276,30 @@ func (profile *Profile) CallRequestBatterySwap(ctx context.Context, session *csm
 	}
 	return csms.Call[v21.RequestBatterySwapRequest, v21.RequestBatterySwapConfirmation](ctx, session, request)
 }
+func (profile *Profile) CallOpenPeriodicEventStream(ctx context.Context, session *csms.Session, request v21.OpenPeriodicEventStreamRequest) (v21.OpenPeriodicEventStreamConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.OpenPeriodicEventStreamConfirmation{}, err
+	}
+	return csms.Call[v21.OpenPeriodicEventStreamRequest, v21.OpenPeriodicEventStreamConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallGetPeriodicEventStream(ctx context.Context, session *csms.Session, request v21.GetPeriodicEventStreamRequest) (v21.GetPeriodicEventStreamConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.GetPeriodicEventStreamConfirmation{}, err
+	}
+	return csms.Call[v21.GetPeriodicEventStreamRequest, v21.GetPeriodicEventStreamConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallAdjustPeriodicEventStream(ctx context.Context, session *csms.Session, request v21.AdjustPeriodicEventStreamRequest) (v21.AdjustPeriodicEventStreamConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.AdjustPeriodicEventStreamConfirmation{}, err
+	}
+	return csms.Call[v21.AdjustPeriodicEventStreamRequest, v21.AdjustPeriodicEventStreamConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallClosePeriodicEventStream(ctx context.Context, session *csms.Session, request v21.ClosePeriodicEventStreamRequest) (v21.ClosePeriodicEventStreamConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.ClosePeriodicEventStreamConfirmation{}, err
+	}
+	return csms.Call[v21.ClosePeriodicEventStreamRequest, v21.ClosePeriodicEventStreamConfirmation](ctx, session, request)
+}
 
 func (profile *Profile) requireBooted(session *csms.Session) error {
 	if !profile.IsBooted(session) {
