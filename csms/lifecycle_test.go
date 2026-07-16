@@ -3,9 +3,11 @@ package csms
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,6 +115,98 @@ func TestNewRejectsInvalidLifecycleTimeouts(t *testing.T) {
 	}
 	if _, err := New(Config{IdleTimeout: -time.Second}); err == nil {
 		t.Fatal("New succeeded with negative idle timeout")
+	}
+}
+
+func TestAbruptDisconnectAllowsSameIdentityToReconnect(t *testing.T) {
+	server, err := New(Config{Versions: []protocol.Version{protocol.OCPP201}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	first := dialTestStation(t, httpServer.URL, protocol.OCPP201)
+	firstSession, ok := server.Session("CP-001")
+	if !ok {
+		t.Fatal("first session not registered")
+	}
+	if err := first.UnderlyingConn().Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-firstSession.Done():
+	case <-time.After(time.Second):
+		t.Fatal("abruptly disconnected session was not closed")
+	}
+	deadline := time.Now().Add(time.Second)
+	for server.SessionCount() != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if server.SessionCount() != 0 {
+		t.Fatal("abruptly disconnected session was not unregistered")
+	}
+
+	second := dialTestStation(t, httpServer.URL, protocol.OCPP201)
+	defer second.Close()
+	secondSession, ok := server.Session("CP-001")
+	if !ok || secondSession == firstSession {
+		t.Fatal("same identity did not reconnect with a new session")
+	}
+}
+
+func TestConcurrentSessionLifecycle(t *testing.T) {
+	const stationCount = 32
+	server, err := New(Config{Versions: []protocol.Version{protocol.OCPP21}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	type dialResult struct {
+		conn *websocket.Conn
+		err  error
+	}
+	results := make(chan dialResult, stationCount)
+	var wg sync.WaitGroup
+	for i := 0; i < stationCount; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			dialer := websocket.Dialer{Subprotocols: []string{string(protocol.OCPP21)}}
+			conn, _, err := dialer.Dial(
+				"ws"+strings.TrimPrefix(httpServer.URL, "http")+fmt.Sprintf("/CP-%03d", index), nil,
+			)
+			results <- dialResult{conn: conn, err: err}
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	connections := make([]*websocket.Conn, 0, stationCount)
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		connections = append(connections, result.conn)
+	}
+	if server.SessionCount() != stationCount {
+		t.Fatalf("session count = %d, want %d", server.SessionCount(), stationCount)
+	}
+
+	for _, conn := range connections {
+		wg.Add(1)
+		go func(conn *websocket.Conn) {
+			defer wg.Done()
+			_ = conn.Close()
+		}(conn)
+	}
+	wg.Wait()
+	deadline := time.Now().Add(2 * time.Second)
+	for server.SessionCount() != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if server.SessionCount() != 0 {
+		t.Fatalf("session count after close = %d", server.SessionCount())
 	}
 }
 
