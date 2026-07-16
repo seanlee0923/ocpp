@@ -46,6 +46,7 @@ type GetTariffsHandler func(context.Context, *csms.Session, v21.GetTariffsReques
 type NotifySettlementHandler func(context.Context, *csms.Session, v21.NotifySettlementRequest) (v21.NotifySettlementConfirmation, error)
 type NotifyWebPaymentStartedHandler func(context.Context, *csms.Session, v21.NotifyWebPaymentStartedRequest) (v21.NotifyWebPaymentStartedConfirmation, error)
 type VatNumberValidationHandler func(context.Context, *csms.Session, v21.VatNumberValidationRequest) (v21.VatNumberValidationConfirmation, error)
+type BatterySwapHandler func(context.Context, *csms.Session, v21.BatterySwapRequest) (v21.BatterySwapConfirmation, error)
 
 type sessionState struct{ registration atomic.Uint32 }
 
@@ -150,6 +151,9 @@ func (profile *Profile) HandleNotifyWebPaymentStarted(handler NotifyWebPaymentSt
 }
 func (profile *Profile) HandleVatNumberValidation(handler VatNumberValidationHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.VatNumberValidationRequest, v21.VatNumberValidationConfirmation](handler))
+}
+func (profile *Profile) HandleBatterySwap(handler BatterySwapHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.BatterySwapRequest, v21.BatterySwapConfirmation](handler))
 }
 
 func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {
@@ -265,6 +269,12 @@ func (profile *Profile) CallCostUpdated(ctx context.Context, session *csms.Sessi
 		return v21.CostUpdatedConfirmation{}, err
 	}
 	return csms.Call[v21.CostUpdatedRequest, v21.CostUpdatedConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallRequestBatterySwap(ctx context.Context, session *csms.Session, request v21.RequestBatterySwapRequest) (v21.RequestBatterySwapConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.RequestBatterySwapConfirmation{}, err
+	}
+	return csms.Call[v21.RequestBatterySwapRequest, v21.RequestBatterySwapConfirmation](ctx, session, request)
 }
 
 func (profile *Profile) requireBooted(session *csms.Session) error {

@@ -101,7 +101,7 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var transactions, reports, clearedLimits, schedulePulls, derStarts, tariffGets atomic.Int32
+	var transactions, reports, clearedLimits, schedulePulls, derStarts, tariffGets, batterySwaps atomic.Int32
 	if err := profile.HandleBootNotification(func(context.Context, *csms.Session, v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error) {
 		return v21.BootNotificationConfirmation{CurrentTime: "2026-07-16T00:00:00Z", Interval: 300, Status: v21.BootNotificationConfirmationRegistrationStatusEnumAccepted}, nil
 	}); err != nil {
@@ -155,6 +155,15 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 		}
 		tariffGets.Add(1)
 		return v21.GetTariffsConfirmation{Status: v21.GetTariffsConfirmationTariffGetStatusEnumNoTariff}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.HandleBatterySwap(func(_ context.Context, _ *csms.Session, request v21.BatterySwapRequest) (v21.BatterySwapConfirmation, error) {
+		if request.RequestID != 31 || len(request.BatteryData) != 1 {
+			t.Errorf("BatterySwap = %#v", request)
+		}
+		batterySwaps.Add(1)
+		return v21.BatterySwapConfirmation{}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -219,6 +228,14 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	sendCall(t, conn, "get-tariffs", v21.GetTariffsRequest{EVSEID: 1})
 	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
 		t.Fatalf("GetTariffs response type = %d", response.Type())
+	}
+	sendCall(t, conn, "battery-in", v21.BatterySwapRequest{
+		RequestID: 31, EventType: v21.BatterySwapRequestBatterySwapEventEnumBatteryIn,
+		IDToken:     v21.BatterySwapRequestIDToken{IDToken: "BATTERY-USER", Type: "Local"},
+		BatteryData: []v21.BatterySwapRequestBatteryData{{EVSEID: 1, SerialNumber: "BAT-001", SoC: 80, SoH: 95}},
+	})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("BatterySwap response type = %d", response.Type())
 	}
 
 	variableResult := make(chan v21.GetVariablesConfirmation, 1)
@@ -354,8 +371,36 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for CostUpdated confirmation")
 	}
-	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 || tariffGets.Load() != 1 {
-		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d tariffGets=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load(), tariffGets.Load())
+
+	batteryResult := make(chan v21.RequestBatterySwapConfirmation, 1)
+	batteryError := make(chan error, 1)
+	go func() {
+		confirmation, err := profile.CallRequestBatterySwap(context.Background(), session, v21.RequestBatterySwapRequest{
+			RequestID: 32, IDToken: v21.RequestBatterySwapRequestIDToken{IDToken: "BATTERY-USER", Type: "Local"},
+		})
+		if err != nil {
+			batteryError <- err
+			return
+		}
+		batteryResult <- confirmation
+	}()
+	outbound = readMessage(t, conn).(protocol.Call)
+	if outbound.Action != "RequestBatterySwap" {
+		t.Fatalf("outbound action = %q", outbound.Action)
+	}
+	sendCallResult(t, conn, outbound.ID, v21.RequestBatterySwapConfirmation{Status: v21.RequestBatterySwapConfirmationGenericStatusEnumAccepted})
+	select {
+	case err := <-batteryError:
+		t.Fatal(err)
+	case confirmation := <-batteryResult:
+		if confirmation.Status != v21.RequestBatterySwapConfirmationGenericStatusEnumAccepted {
+			t.Fatalf("status = %q", confirmation.Status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for RequestBatterySwap confirmation")
+	}
+	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 || tariffGets.Load() != 1 || batterySwaps.Load() != 1 {
+		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d tariffGets=%d batterySwaps=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load(), tariffGets.Load(), batterySwaps.Load())
 	}
 }
 
