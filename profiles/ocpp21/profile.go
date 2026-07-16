@@ -39,6 +39,9 @@ type ClearedChargingLimitHandler func(context.Context, *csms.Session, v21.Cleare
 type ReportChargingProfilesHandler func(context.Context, *csms.Session, v21.ReportChargingProfilesRequest) (v21.ReportChargingProfilesConfirmation, error)
 type NotifyPriorityChargingHandler func(context.Context, *csms.Session, v21.NotifyPriorityChargingRequest) (v21.NotifyPriorityChargingConfirmation, error)
 type PullDynamicScheduleUpdateHandler func(context.Context, *csms.Session, v21.PullDynamicScheduleUpdateRequest) (v21.PullDynamicScheduleUpdateConfirmation, error)
+type ReportDERControlHandler func(context.Context, *csms.Session, v21.ReportDERControlRequest) (v21.ReportDERControlConfirmation, error)
+type NotifyDERAlarmHandler func(context.Context, *csms.Session, v21.NotifyDERAlarmRequest) (v21.NotifyDERAlarmConfirmation, error)
+type NotifyDERStartStopHandler func(context.Context, *csms.Session, v21.NotifyDERStartStopRequest) (v21.NotifyDERStartStopConfirmation, error)
 
 type sessionState struct{ registration atomic.Uint32 }
 
@@ -123,6 +126,15 @@ func (profile *Profile) HandleNotifyPriorityCharging(handler NotifyPriorityCharg
 func (profile *Profile) HandlePullDynamicScheduleUpdate(handler PullDynamicScheduleUpdateHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.PullDynamicScheduleUpdateRequest, v21.PullDynamicScheduleUpdateConfirmation](handler))
 }
+func (profile *Profile) HandleReportDERControl(handler ReportDERControlHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.ReportDERControlRequest, v21.ReportDERControlConfirmation](handler))
+}
+func (profile *Profile) HandleNotifyDERAlarm(handler NotifyDERAlarmHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyDERAlarmRequest, v21.NotifyDERAlarmConfirmation](handler))
+}
+func (profile *Profile) HandleNotifyDERStartStop(handler NotifyDERStartStopHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyDERStartStopRequest, v21.NotifyDERStartStopConfirmation](handler))
+}
 
 func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {
 	if err := profile.requireBooted(session); err != nil {
@@ -195,6 +207,24 @@ func (profile *Profile) CallAFRRSignal(ctx context.Context, session *csms.Sessio
 		return v21.AFRRSignalConfirmation{}, err
 	}
 	return csms.Call[v21.AFRRSignalRequest, v21.AFRRSignalConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallSetDERControl(ctx context.Context, session *csms.Session, request v21.SetDERControlRequest) (v21.SetDERControlConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.SetDERControlConfirmation{}, err
+	}
+	return csms.Call[v21.SetDERControlRequest, v21.SetDERControlConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallGetDERControl(ctx context.Context, session *csms.Session, request v21.GetDERControlRequest) (v21.GetDERControlConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.GetDERControlConfirmation{}, err
+	}
+	return csms.Call[v21.GetDERControlRequest, v21.GetDERControlConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallClearDERControl(ctx context.Context, session *csms.Session, request v21.ClearDERControlRequest) (v21.ClearDERControlConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.ClearDERControlConfirmation{}, err
+	}
+	return csms.Call[v21.ClearDERControlRequest, v21.ClearDERControlConfirmation](ctx, session, request)
 }
 
 func (profile *Profile) requireBooted(session *csms.Session) error {

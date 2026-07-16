@@ -101,7 +101,7 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var transactions, reports, clearedLimits, schedulePulls atomic.Int32
+	var transactions, reports, clearedLimits, schedulePulls, derStarts atomic.Int32
 	if err := profile.HandleBootNotification(func(context.Context, *csms.Session, v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error) {
 		return v21.BootNotificationConfirmation{CurrentTime: "2026-07-16T00:00:00Z", Interval: 300, Status: v21.BootNotificationConfirmationRegistrationStatusEnumAccepted}, nil
 	}); err != nil {
@@ -137,6 +137,15 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 		}
 		schedulePulls.Add(1)
 		return v21.PullDynamicScheduleUpdateConfirmation{Status: v21.PullDynamicScheduleUpdateConfirmationChargingProfileStatusEnumAccepted}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.HandleNotifyDERStartStop(func(_ context.Context, _ *csms.Session, request v21.NotifyDERStartStopRequest) (v21.NotifyDERStartStopConfirmation, error) {
+		if request.ControlID != "DER-21" || !request.Started {
+			t.Errorf("DER start/stop = %#v", request)
+		}
+		derStarts.Add(1)
+		return v21.NotifyDERStartStopConfirmation{}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +202,10 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	sendCall(t, conn, "pull-schedule", v21.PullDynamicScheduleUpdateRequest{ChargingProfileID: 210})
 	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
 		t.Fatalf("PullDynamicScheduleUpdate response type = %d", response.Type())
+	}
+	sendCall(t, conn, "der-start", v21.NotifyDERStartStopRequest{ControlID: "DER-21", Started: true, Timestamp: "2026-07-16T00:02:30Z"})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("NotifyDERStartStop response type = %d", response.Type())
 	}
 
 	variableResult := make(chan v21.GetVariablesConfirmation, 1)
@@ -279,8 +292,34 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for UsePriorityCharging confirmation")
 	}
-	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 {
-		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load())
+
+	derResult := make(chan v21.ClearDERControlConfirmation, 1)
+	derError := make(chan error, 1)
+	go func() {
+		confirmation, err := profile.CallClearDERControl(context.Background(), session, v21.ClearDERControlRequest{IsDefault: true})
+		if err != nil {
+			derError <- err
+			return
+		}
+		derResult <- confirmation
+	}()
+	outbound = readMessage(t, conn).(protocol.Call)
+	if outbound.Action != "ClearDERControl" {
+		t.Fatalf("outbound action = %q", outbound.Action)
+	}
+	sendCallResult(t, conn, outbound.ID, v21.ClearDERControlConfirmation{Status: v21.ClearDERControlConfirmationDERControlStatusEnumAccepted})
+	select {
+	case err := <-derError:
+		t.Fatal(err)
+	case confirmation := <-derResult:
+		if confirmation.Status != v21.ClearDERControlConfirmationDERControlStatusEnumAccepted {
+			t.Fatalf("status = %q", confirmation.Status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ClearDERControl confirmation")
+	}
+	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 {
+		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load())
 	}
 }
 
