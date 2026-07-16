@@ -26,6 +26,17 @@ const (
 
 var ErrInvalidMessage = errors.New("invalid OCPP message")
 
+type UnsupportedMessageTypeError struct {
+	ID   string
+	Type MessageTypeID
+}
+
+func (e *UnsupportedMessageTypeError) Error() string {
+	return fmt.Sprintf("%v: unknown message type %d", ErrInvalidMessage, e.Type)
+}
+
+func (e *UnsupportedMessageTypeError) Unwrap() error { return ErrInvalidMessage }
+
 const (
 	MaxUniqueIDLength         = 36
 	MaxActionLength           = 64
@@ -169,7 +180,14 @@ func Decode(data []byte) (Message, error) {
 		}
 		return CallError{ID: id, Code: code, Description: description, Details: fields[4]}, nil
 	default:
-		return nil, fmt.Errorf("%w: unknown message type %d", ErrInvalidMessage, messageType)
+		id := "-1"
+		if len(fields) > 1 {
+			var candidate string
+			if json.Unmarshal(fields[1], &candidate) == nil && validLength(candidate, MaxUniqueIDLength) {
+				id = candidate
+			}
+		}
+		return nil, &UnsupportedMessageTypeError{ID: id, Type: messageType}
 	}
 }
 

@@ -58,6 +58,22 @@ func TestDecodeRejectsInvalidUTF8(t *testing.T) {
 	}
 }
 
+func TestDecodePreservesIDForUnsupportedMessageType(t *testing.T) {
+	_, err := Decode([]byte(`[9,"future-1",{}]`))
+	var unsupported *UnsupportedMessageTypeError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("error = %T %v, want UnsupportedMessageTypeError", err, err)
+	}
+	if unsupported.ID != "future-1" || unsupported.Type != 9 {
+		t.Fatalf("unsupported message = %#v", unsupported)
+	}
+
+	_, err = Decode([]byte(`[9,42,{}]`))
+	if !errors.As(err, &unsupported) || unsupported.ID != "-1" {
+		t.Fatalf("invalid ID fallback error = %#v", err)
+	}
+}
+
 func TestEncodeCallErrorUsesEmptyDetailsObject(t *testing.T) {
 	data, err := Encode(CallError{ID: "abc", Code: "NotImplemented", Description: "missing"})
 	if err != nil {

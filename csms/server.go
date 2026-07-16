@@ -2,6 +2,7 @@ package csms
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -38,12 +39,16 @@ const (
 	NotImplemented                ErrorCode = "NotImplemented"
 	NotSupported                  ErrorCode = "NotSupported"
 	FormationViolation            ErrorCode = "FormationViolation"
+	FormatViolation               ErrorCode = "FormatViolation"
 	InternalError                 ErrorCode = "InternalError"
 	ProtocolError                 ErrorCode = "ProtocolError"
 	SecurityError                 ErrorCode = "SecurityError"
 	PropertyConstraintViolation   ErrorCode = "PropertyConstraintViolation"
+	OccurenceConstraintViolation  ErrorCode = "OccurenceConstraintViolation"
 	OccurrenceConstraintViolation ErrorCode = "OccurrenceConstraintViolation"
 	TypeConstraintViolation       ErrorCode = "TypeConstraintViolation"
+	MessageTypeNotSupported       ErrorCode = "MessageTypeNotSupported"
+	RpcFrameworkError             ErrorCode = "RpcFrameworkError"
 	GenericError                  ErrorCode = "GenericError"
 )
 
@@ -461,6 +466,14 @@ func (s *Server) readLoop(session *Session) error {
 		session.markReceived()
 		message, err := protocol.Decode(data)
 		if err != nil {
+			var unsupported *protocol.UnsupportedMessageTypeError
+			if session.version != protocol.OCPP16 && errors.As(err, &unsupported) {
+				_ = session.Send(session.Context(), protocol.CallError{
+					ID: unsupported.ID, Code: string(MessageTypeNotSupported),
+					Description: "message type is not supported", Details: json.RawMessage(`{}`),
+				})
+				continue
+			}
 			return err
 		}
 		switch value := message.(type) {
@@ -472,6 +485,13 @@ func (s *Server) readLoop(session *Session) error {
 			}
 		case protocol.Send:
 			if session.version != protocol.OCPP21 {
+				if session.version == protocol.OCPP201 {
+					_ = session.Send(session.Context(), protocol.CallError{
+						ID: value.ID, Code: string(MessageTypeNotSupported),
+						Description: "SEND is only supported by OCPP 2.1", Details: json.RawMessage(`{}`),
+					})
+					continue
+				}
 				return fmt.Errorf("SEND is only supported by OCPP 2.1")
 			}
 			if !session.startHandler(func(ctx context.Context) {
@@ -535,6 +555,10 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 	if !errors.As(err, &callError) {
 		callError = &CallError{Code: InternalError, Description: "internal error", Details: map[string]any{}}
 	}
+	if !validErrorCode(session.version, callError.Code) {
+		callError = &CallError{Code: InternalError, Description: "internal error", Details: map[string]any{}}
+	}
+	callError.Description = truncateRunes(callError.Description, protocol.MaxErrorDescriptionLength)
 	details := callError.Details
 	if details == nil {
 		details = map[string]any{}
@@ -546,6 +570,27 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 	record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, callError.Code, "handler_error"
 	s.log(ctx, record)
 	_ = session.Send(ctx, protocol.CallError{ID: call.ID, Code: string(callError.Code), Description: callError.Description, Details: raw})
+}
+
+func validErrorCode(version protocol.Version, code ErrorCode) bool {
+	switch code {
+	case NotImplemented, NotSupported, InternalError, ProtocolError, SecurityError,
+		PropertyConstraintViolation, TypeConstraintViolation, GenericError:
+		return true
+	}
+	if version == protocol.OCPP16 {
+		return code == FormationViolation || code == OccurenceConstraintViolation
+	}
+	return code == FormatViolation || code == OccurrenceConstraintViolation ||
+		code == MessageTypeNotSupported || code == RpcFrameworkError
+}
+
+func truncateRunes(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
 }
 
 func disconnectReason(err error) string {

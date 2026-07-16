@@ -41,7 +41,7 @@ func TestTypedHandlerValidatesDecodesAndValidatesResponse(t *testing.T) {
 	}
 }
 
-func TestTypedHandlerRejectsRawUnknownPropertyBeforeDecode(t *testing.T) {
+func TestTypedHandlerClassifiesPayloadConstraintViolations(t *testing.T) {
 	router := NewRouter()
 	err := Handle(router, func(_ context.Context, _ *Session, _ v16.BootNotificationRequest) (v16.BootNotificationConfirmation, error) {
 		t.Fatal("handler called for invalid payload")
@@ -51,10 +51,48 @@ func TestTypedHandlerRejectsRawUnknownPropertyBeforeDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler, _ := router.lookup(protocol.OCPP16, "BootNotification")
-	_, err = handler(context.Background(), nil, json.RawMessage(`{"chargePointVendor":"Example","chargePointModel":"AC-22K","unknown":true}`))
-	var callError *CallError
-	if !errors.As(err, &callError) || callError.Code != FormationViolation {
-		t.Fatalf("error = %#v, want FormationViolation", err)
+	tests := []struct {
+		name string
+		raw  string
+		code ErrorCode
+	}{
+		{"unknown property", `{"chargePointVendor":"Example","chargePointModel":"AC-22K","unknown":true}`, PropertyConstraintViolation},
+		{"missing required property", `{"chargePointVendor":"Example"}`, OccurenceConstraintViolation},
+		{"wrong property type", `{"chargePointVendor":42,"chargePointModel":"AC-22K"}`, TypeConstraintViolation},
+		{"trailing JSON value", `{"chargePointVendor":"Example","chargePointModel":"AC-22K"} {}`, FormationViolation},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := handler(context.Background(), nil, json.RawMessage(test.raw))
+			var callError *CallError
+			if !errors.As(err, &callError) || callError.Code != test.code {
+				t.Fatalf("error = %#v, want %s", err, test.code)
+			}
+		})
+	}
+}
+
+func TestValidationErrorCodesAreVersionSpecific(t *testing.T) {
+	missingRequired := (v16.BootNotificationRequest{}).ValidateJSON([]byte(`{"chargePointVendor":"Example"}`))
+	if missingRequired == nil {
+		t.Fatal("missing required property was accepted")
+	}
+	tests := []struct {
+		version protocol.Version
+		err     error
+		want    ErrorCode
+	}{
+		{protocol.OCPP16, missingRequired, OccurenceConstraintViolation},
+		{protocol.OCPP201, missingRequired, OccurrenceConstraintViolation},
+		{protocol.OCPP21, missingRequired, OccurrenceConstraintViolation},
+		{protocol.OCPP16, errors.New("malformed JSON"), FormationViolation},
+		{protocol.OCPP201, errors.New("malformed JSON"), FormatViolation},
+		{protocol.OCPP21, errors.New("malformed JSON"), FormatViolation},
+	}
+	for _, test := range tests {
+		if got := validationErrorCode(test.version, test.err); got != test.want {
+			t.Errorf("validationErrorCode(%s) = %q, want %q", test.version, got, test.want)
+		}
 	}
 }
 

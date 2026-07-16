@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"ocpp-go/protocol"
+	"ocpp-go/v16"
 )
 
 func TestServerNegotiatesAndRoutes(t *testing.T) {
@@ -48,7 +49,63 @@ func TestServerNegotiatesAndRoutes(t *testing.T) {
 }
 
 func TestServerRejectsSendOnPre21Connections(t *testing.T) {
-	for _, version := range []protocol.Version{protocol.OCPP16, protocol.OCPP201} {
+	t.Run(string(protocol.OCPP16), func(t *testing.T) {
+		server, err := New(Config{Versions: []protocol.Version{protocol.OCPP16}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		httpServer := httptest.NewServer(server)
+		defer httpServer.Close()
+		conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
+		defer conn.Close()
+		data, err := protocol.Encode(protocol.Send{ID: "send-1", Action: "NotifyPeriodicEventStream", Payload: json.RawMessage(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := conn.ReadMessage(); err == nil {
+			t.Fatal("OCPP 1.6 connection remained open after SEND")
+		}
+	})
+
+	t.Run(string(protocol.OCPP201), func(t *testing.T) {
+		server, err := New(Config{Versions: []protocol.Version{protocol.OCPP201}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		httpServer := httptest.NewServer(server)
+		defer httpServer.Close()
+		conn := dialTestStation(t, httpServer.URL, protocol.OCPP201)
+		defer conn.Close()
+		data, err := protocol.Encode(protocol.Send{ID: "send-1", Action: "NotifyPeriodicEventStream", Payload: json.RawMessage(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			t.Fatal(err)
+		}
+		_, response, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := protocol.Decode(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		callError, ok := decoded.(protocol.CallError)
+		if !ok || callError.ID != "send-1" || callError.Code != string(MessageTypeNotSupported) {
+			t.Fatalf("response = %#v, want MessageTypeNotSupported CALLERROR", decoded)
+		}
+	})
+}
+
+func TestServerReturnsMessageTypeNotSupportedForUnknown20xMessage(t *testing.T) {
+	for _, version := range []protocol.Version{protocol.OCPP201, protocol.OCPP21} {
 		t.Run(string(version), func(t *testing.T) {
 			server, err := New(Config{Versions: []protocol.Version{version}})
 			if err != nil {
@@ -58,20 +115,113 @@ func TestServerRejectsSendOnPre21Connections(t *testing.T) {
 			defer httpServer.Close()
 			conn := dialTestStation(t, httpServer.URL, version)
 			defer conn.Close()
-			data, err := protocol.Encode(protocol.Send{ID: "send-1", Action: "NotifyPeriodicEventStream", Payload: json.RawMessage(`{}`)})
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(`[9,"future-1",{}]`)); err != nil {
+				t.Fatal(err)
+			}
+			_, response, err := conn.ReadMessage()
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			decoded, err := protocol.Decode(response)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
-				t.Fatal(err)
-			}
-			if _, _, err := conn.ReadMessage(); err == nil {
-				t.Fatal("pre-2.1 connection remained open after SEND")
+			callError, ok := decoded.(protocol.CallError)
+			if !ok || callError.ID != "future-1" || callError.Code != string(MessageTypeNotSupported) {
+				t.Fatalf("response = %#v, want MessageTypeNotSupported CALLERROR", decoded)
 			}
 		})
+	}
+}
+
+func TestServerWritesClassifiedConstraintCallErrors(t *testing.T) {
+	router := NewRouter()
+	if err := Handle(router, func(context.Context, *Session, v16.BootNotificationRequest) (v16.BootNotificationConfirmation, error) {
+		return validV16BootConfirmation(), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
+	defer conn.Close()
+
+	tests := []struct {
+		id      string
+		payload string
+		code    ErrorCode
+	}{
+		{"property", `{"chargePointVendor":"Example","chargePointModel":"AC-22K","unknown":true}`, PropertyConstraintViolation},
+		{"occurrence", `{"chargePointVendor":"Example"}`, OccurenceConstraintViolation},
+		{"type", `{"chargePointVendor":42,"chargePointModel":"AC-22K"}`, TypeConstraintViolation},
+	}
+	for _, test := range tests {
+		message := `[2,"` + test.id + `","BootNotification",` + test.payload + `]`
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
+			t.Fatal(err)
+		}
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := protocol.Decode(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		callError, ok := decoded.(protocol.CallError)
+		if !ok {
+			t.Fatalf("response = %T, want CALLERROR", decoded)
+		}
+		if callError.ID != test.id || callError.Code != string(test.code) {
+			t.Fatalf("CALLERROR = %#v, want id=%q code=%q", callError, test.id, test.code)
+		}
+	}
+}
+
+func TestServerNormalizesApplicationCallErrors(t *testing.T) {
+	router := NewRouter()
+	router.Handle(protocol.OCPP201, "InvalidCode", func(context.Context, *Session, json.RawMessage) (any, error) {
+		return nil, &CallError{Code: ErrorCode("VendorError"), Description: "must not leak", Details: map[string]any{"secret": true}}
+	})
+	router.Handle(protocol.OCPP201, "LongDescription", func(context.Context, *Session, json.RawMessage) (any, error) {
+		return nil, &CallError{Code: GenericError, Description: strings.Repeat("가", protocol.MaxErrorDescriptionLength+1)}
+	})
+	server, err := New(Config{Router: router, Versions: []protocol.Version{protocol.OCPP201}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP201)
+	defer conn.Close()
+
+	for _, test := range []struct {
+		id, action, code string
+		descriptionRunes int
+	}{
+		{"invalid", "InvalidCode", string(InternalError), len([]rune("internal error"))},
+		{"long", "LongDescription", string(GenericError), protocol.MaxErrorDescriptionLength},
+	} {
+		message := `[2,"` + test.id + `","` + test.action + `",{}]`
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
+			t.Fatal(err)
+		}
+		_, response, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := protocol.Decode(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		callError := decoded.(protocol.CallError)
+		if callError.Code != test.code || len([]rune(callError.Description)) != test.descriptionRunes {
+			t.Fatalf("CALLERROR = %#v", callError)
+		}
 	}
 }
 

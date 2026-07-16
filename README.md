@@ -167,8 +167,17 @@ err := csms.Handle(router, func(
 ```
 
 Request와 Confirmation의 버전, Action, 방향이 다르면 등록 단계에서 거부됩니다.
-잘못된 request는 `FormationViolation`, 잘못된 confirmation은 `InternalError`로
-변환됩니다.
+잘못된 request는 원인과 OCPP-J 버전에 따라 constraint CALLERROR로 변환됩니다.
+
+- unknown property, enum, 길이·범위·format: `PropertyConstraintViolation`
+- required 누락, 배열 항목 수: OCPP 1.6 `OccurenceConstraintViolation`,
+  OCPP 2.0.1/2.1 `OccurrenceConstraintViolation`
+- JSON field type 불일치: `TypeConstraintViolation`
+- payload 문법 오류: OCPP 1.6 `FormationViolation`, OCPP 2.0.1/2.1
+  `FormatViolation`
+
+잘못된 confirmation은 `InternalError`로 변환됩니다. OCPP 2.0.1/2.1에서 지원하지 않는
+MessageType은 `MessageTypeNotSupported` CALLERROR로 응답합니다.
 
 ## OCPP 1.6 Core Profile
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"ocpp-go/internal/validation"
 	"ocpp-go/protocol"
 )
 
@@ -78,7 +79,7 @@ func Handle[Request protocol.Payload, Confirmation protocol.Payload](
 	router.Handle(version, action, func(ctx context.Context, session *Session, raw json.RawMessage) (any, error) {
 		if err := request.ValidateJSON(raw); err != nil {
 			return nil, &CallError{
-				Code:        FormationViolation,
+				Code:        validationErrorCode(version, err),
 				Description: "request payload does not conform to the OCPP schema",
 				Details:     map[string]any{"error": err.Error()},
 			}
@@ -106,6 +107,33 @@ func Handle[Request protocol.Payload, Confirmation protocol.Payload](
 		return response, nil
 	})
 	return nil
+}
+
+func validationErrorCode(version protocol.Version, err error) ErrorCode {
+	kind, ok := validation.KindOf(err)
+	if !ok {
+		return formatViolationCode(version)
+	}
+	switch kind {
+	case validation.PropertyConstraintError:
+		return PropertyConstraintViolation
+	case validation.OccurrenceConstraintError:
+		if version == protocol.OCPP16 {
+			return OccurenceConstraintViolation
+		}
+		return OccurrenceConstraintViolation
+	case validation.TypeConstraintError:
+		return TypeConstraintViolation
+	default:
+		return formatViolationCode(version)
+	}
+}
+
+func formatViolationCode(version protocol.Version) ErrorCode {
+	if version == protocol.OCPP16 {
+		return FormationViolation
+	}
+	return FormatViolation
 }
 
 func isNilType[T any](value T) bool {

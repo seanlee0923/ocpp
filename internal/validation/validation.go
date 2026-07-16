@@ -49,7 +49,17 @@ type Error struct {
 	Schema string
 	Path   string
 	Reason string
+	Kind   ErrorKind
 }
+
+type ErrorKind uint8
+
+const (
+	FormationError ErrorKind = iota + 1
+	PropertyConstraintError
+	OccurrenceConstraintError
+	TypeConstraintError
+)
 
 func (e *Error) Error() string {
 	if e.Path == "" {
@@ -61,6 +71,14 @@ func (e *Error) Error() string {
 func IsError(err error) bool {
 	var target *Error
 	return errors.As(err, &target)
+}
+
+func KindOf(err error) (ErrorKind, bool) {
+	var target *Error
+	if !errors.As(err, &target) {
+		return 0, false
+	}
+	return target.Kind, true
 }
 
 func Validate(name string, schema *Schema, value any) error {
@@ -80,7 +98,7 @@ func ValidateJSON(name string, schema *Schema, data []byte) error {
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return &Error{Schema: name, Reason: "trailing JSON value"}
+		return &Error{Schema: name, Reason: "trailing JSON value", Kind: FormationError}
 	}
 	if err := validate(schema, value, "$", name); err != nil {
 		return err
@@ -98,21 +116,21 @@ func validate(schema *Schema, value any, path, name string) error {
 		}
 	}
 	if len(schema.AnyOf) > 0 && matching(schema.AnyOf, value, path, name) == 0 {
-		return invalid(name, path, "does not match any allowed schema")
+		return invalid(name, path, "does not match any allowed schema", PropertyConstraintError)
 	}
 	if len(schema.OneOf) > 0 && matching(schema.OneOf, value, path, name) != 1 {
-		return invalid(name, path, "does not match exactly one allowed schema")
+		return invalid(name, path, "does not match exactly one allowed schema", PropertyConstraintError)
 	}
 
 	switch schema.Type {
 	case "object":
 		object, ok := value.(map[string]any)
 		if !ok {
-			return invalid(name, path, "must be an object")
+			return invalid(name, path, "must be an object", TypeConstraintError)
 		}
 		for _, required := range schema.Required {
 			if _, ok := object[required]; !ok {
-				return invalid(name, path, fmt.Sprintf("required property %q is missing", required))
+				return invalid(name, path, fmt.Sprintf("required property %q is missing", required), OccurrenceConstraintError)
 			}
 		}
 		for key, child := range object {
@@ -129,19 +147,19 @@ func validate(schema *Schema, value any, path, name string) error {
 				continue
 			}
 			if !schema.AllowAdditional {
-				return invalid(name, childPath(path, key), "unknown property")
+				return invalid(name, childPath(path, key), "unknown property", PropertyConstraintError)
 			}
 		}
 	case "array":
 		array, ok := value.([]any)
 		if !ok {
-			return invalid(name, path, "must be an array")
+			return invalid(name, path, "must be an array", TypeConstraintError)
 		}
 		if schema.HasMinItems && len(array) < schema.MinItems {
-			return invalid(name, path, fmt.Sprintf("must contain at least %d items", schema.MinItems))
+			return invalid(name, path, fmt.Sprintf("must contain at least %d items", schema.MinItems), OccurrenceConstraintError)
 		}
 		if schema.HasMaxItems && len(array) > schema.MaxItems {
-			return invalid(name, path, fmt.Sprintf("must contain at most %d items", schema.MaxItems))
+			return invalid(name, path, fmt.Sprintf("must contain at most %d items", schema.MaxItems), OccurrenceConstraintError)
 		}
 		for index, item := range array {
 			if err := validate(schema.Items, item, fmt.Sprintf("%s[%d]", path, index), name); err != nil {
@@ -151,58 +169,58 @@ func validate(schema *Schema, value any, path, name string) error {
 	case "string":
 		text, ok := value.(string)
 		if !ok {
-			return invalid(name, path, "must be a string")
+			return invalid(name, path, "must be a string", TypeConstraintError)
 		}
 		length := utf8.RuneCountInString(text)
 		if schema.HasMinLength && length < schema.MinLength {
-			return invalid(name, path, fmt.Sprintf("must contain at least %d characters", schema.MinLength))
+			return invalid(name, path, fmt.Sprintf("must contain at least %d characters", schema.MinLength), PropertyConstraintError)
 		}
 		if schema.HasMaxLength && length > schema.MaxLength {
-			return invalid(name, path, fmt.Sprintf("must contain at most %d characters", schema.MaxLength))
+			return invalid(name, path, fmt.Sprintf("must contain at most %d characters", schema.MaxLength), PropertyConstraintError)
 		}
 		if len(schema.Enum) > 0 && !contains(schema.Enum, text) {
-			return invalid(name, path, fmt.Sprintf("value %q is not allowed", text))
+			return invalid(name, path, fmt.Sprintf("value %q is not allowed", text), PropertyConstraintError)
 		}
 		if schema.Pattern != "" {
 			pattern, err := compiledPattern(schema.Pattern)
 			if err != nil || !pattern.MatchString(text) {
-				return invalid(name, path, "does not match the required pattern")
+				return invalid(name, path, "does not match the required pattern", PropertyConstraintError)
 			}
 		}
 		if schema.Format == "date-time" {
 			if _, err := time.Parse(time.RFC3339, text); err != nil {
-				return invalid(name, path, "must be an RFC 3339 date-time")
+				return invalid(name, path, "must be an RFC 3339 date-time", PropertyConstraintError)
 			}
 		}
 		if schema.Format == "uri" {
 			parsed, err := url.Parse(text)
 			if err != nil || parsed.Scheme == "" {
-				return invalid(name, path, "must be an absolute URI")
+				return invalid(name, path, "must be an absolute URI", PropertyConstraintError)
 			}
 		}
 	case "integer":
 		number, ok := value.(json.Number)
 		if !ok {
-			return invalid(name, path, "must be an integer")
+			return invalid(name, path, "must be an integer", TypeConstraintError)
 		}
 		parsed, err := strconv.ParseFloat(number.String(), 64)
 		if err != nil || math.Trunc(parsed) != parsed {
-			return invalid(name, path, "must be an integer")
+			return invalid(name, path, "must be an integer", TypeConstraintError)
 		}
 		return validateNumber(schema, parsed, path, name)
 	case "number":
 		number, ok := value.(json.Number)
 		if !ok {
-			return invalid(name, path, "must be a number")
+			return invalid(name, path, "must be a number", TypeConstraintError)
 		}
 		parsed, err := number.Float64()
 		if err != nil {
-			return invalid(name, path, "must be a number")
+			return invalid(name, path, "must be a number", TypeConstraintError)
 		}
 		return validateNumber(schema, parsed, path, name)
 	case "boolean":
 		if _, ok := value.(bool); !ok {
-			return invalid(name, path, "must be a boolean")
+			return invalid(name, path, "must be a boolean", TypeConstraintError)
 		}
 	}
 	return nil
@@ -210,15 +228,15 @@ func validate(schema *Schema, value any, path, name string) error {
 
 func validateNumber(schema *Schema, value float64, path, name string) error {
 	if schema.HasMinimum && (value < schema.Minimum || schema.ExclusiveMinimum && value == schema.Minimum) {
-		return invalid(name, path, "is below the allowed minimum")
+		return invalid(name, path, "is below the allowed minimum", PropertyConstraintError)
 	}
 	if schema.HasMaximum && (value > schema.Maximum || schema.ExclusiveMaximum && value == schema.Maximum) {
-		return invalid(name, path, "is above the allowed maximum")
+		return invalid(name, path, "is above the allowed maximum", PropertyConstraintError)
 	}
 	if schema.MultipleOf != 0 {
 		quotient := value / schema.MultipleOf
 		if math.Abs(quotient-math.Round(quotient)) > 1e-9 {
-			return invalid(name, path, fmt.Sprintf("must be a multiple of %v", schema.MultipleOf))
+			return invalid(name, path, fmt.Sprintf("must be a multiple of %v", schema.MultipleOf), PropertyConstraintError)
 		}
 	}
 	return nil
@@ -234,8 +252,8 @@ func matching(candidates []*Schema, value any, path, name string) int {
 	return count
 }
 
-func invalid(name, path, reason string) error {
-	return &Error{Schema: name, Path: path, Reason: reason}
+func invalid(name, path, reason string, kind ErrorKind) error {
+	return &Error{Schema: name, Path: path, Reason: reason, Kind: kind}
 }
 
 func childPath(parent, child string) string {
