@@ -69,8 +69,9 @@ type CallError struct {
 func (e *CallError) Error() string { return e.Description }
 
 // Config controls a CSMS Server. Construct it with keyed fields: new optional
-// fields may be added in backward-compatible releases. Zero duration and limit
-// values select documented defaults; negative values are rejected.
+// fields may be added in backward-compatible releases. Zero values select the
+// documented default except IdleTimeout, where zero disables idle detection.
+// Negative durations and limits are rejected.
 type Config struct {
 	Router                *Router
 	Versions              []protocol.Version
@@ -124,8 +125,14 @@ func New(config Config) (*Server, error) {
 	if config.ReadLimit == 0 {
 		config.ReadLimit = 1 << 20
 	}
+	if config.ReadLimit < 0 {
+		return nil, fmt.Errorf("%w: read limit must not be negative", ErrInvalidConfiguration)
+	}
 	if config.HandshakeTimeout == 0 {
 		config.HandshakeTimeout = 10 * time.Second
+	}
+	if config.HandshakeTimeout < 0 {
+		return nil, fmt.Errorf("%w: handshake timeout must not be negative", ErrInvalidConfiguration)
 	}
 	if config.CallTimeout == 0 {
 		config.CallTimeout = 30 * time.Second

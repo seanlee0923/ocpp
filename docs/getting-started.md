@@ -56,3 +56,5 @@ Sec-WebSocket-Protocol: ocpp1.6
 수 있다.
 
 전체 실행 코드는 [`examples/ocpp16-csms`](../examples/ocpp16-csms)에 있다.
+세 버전을 한 process에서 받는 구성은 [`examples/multi-version`](../examples/multi-version)을
+참고한다.

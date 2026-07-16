@@ -33,3 +33,6 @@ OnDuplicateSession: func(ctx context.Context, attempt csms.DuplicateSessionAttem
 
 `Server.Shutdown(ctx)`은 새 연결을 거부하고 활성 세션과 handler가 끝날 때까지 기다린다.
 반복 호출은 안전하지만 종료한 Server는 재사용할 수 없다.
+
+실행 가능한 코드는 [`examples/duplicate-session`](../examples/duplicate-session)과
+[`examples/graceful-shutdown`](../examples/graceful-shutdown)을 참고한다.

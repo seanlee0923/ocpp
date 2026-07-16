@@ -15,8 +15,9 @@
 - `MaxConcurrentHandlers`: 세션별 inbound handler 동시 실행 상한
 - `WriteTimeout`, `PingInterval`, `PongTimeout`, `IdleTimeout`: 연결 생명주기
 
-0은 기본값을 선택하므로 `Config`는 keyed field로 작성한다. handler는 전달된 context를 DB와
-외부 요청에 전파하고 무제한 background goroutine을 만들지 않는다.
+0은 문서화된 기본값을 선택하지만 `IdleTimeout: 0`은 idle 감지를 비활성화한다. 음수 duration과
+limit은 잘못된 설정으로 거부된다. `Config`는 keyed field로 작성하고 handler는 전달된 context를
+DB와 외부 요청에 전파하며 무제한 background goroutine을 만들지 않는다.
 
 ## Proxy와 TLS
 
@@ -29,5 +30,8 @@ TLS를 reverse proxy에서 종료한다면 현재 core는 proxy header를 인증
 `csms.Logger`를 애플리케이션 logger에 연결할 수 있다. 기본 metadata에는 payload, password,
 certificate, idToken과 handler error text가 포함되지 않는다. logger callback panic은 서버에서
 격리된다. metrics, snapshot과 tracing은 향후 opt-in hook으로 제공할 계획이다.
+
+[`examples/structured-logger`](../examples/structured-logger)는 표준 `log/slog` 연결을,
+[`examples/graceful-shutdown`](../examples/graceful-shutdown)은 signal 기반 종료를 보여준다.
 
 release 전에는 `go test -race ./...`와 opt-in soak를 실행하고 goroutine/heap 추이를 확인한다.

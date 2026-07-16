@@ -310,10 +310,7 @@ func TestServerCanReplaceDuplicateSession(t *testing.T) {
 	defer httpServer.Close()
 	firstConn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
 	defer firstConn.Close()
-	firstSession, ok := server.Session("CP-001")
-	if !ok {
-		t.Fatal("first session not registered")
-	}
+	firstSession := waitForSession(t, server, "CP-001")
 
 	secondConn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
 	defer secondConn.Close()
@@ -348,7 +345,7 @@ func TestFailedReplacementUpgradeKeepsExistingSession(t *testing.T) {
 	defer httpServer.Close()
 	firstConn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
 	defer firstConn.Close()
-	firstSession, _ := server.Session("CP-001")
+	firstSession := waitForSession(t, server, "CP-001")
 
 	request, err := http.NewRequest(http.MethodGet, httpServer.URL+"/CP-001", nil)
 	if err != nil {

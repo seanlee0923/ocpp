@@ -29,10 +29,7 @@ func TestSessionPingPongUpdatesInfo(t *testing.T) {
 	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
 	defer conn.Close()
 	stationDone := readStationUntilClosed(conn)
-	session, ok := server.Session("CP-001")
-	if !ok {
-		t.Fatal("session not registered")
-	}
+	session := waitForSession(t, server, "CP-001")
 
 	deadline := time.Now().Add(time.Second)
 	for session.Info().LastPongAt.IsZero() && time.Now().Before(deadline) {
@@ -64,7 +61,7 @@ func TestIdleTimeoutIgnoresPongFrames(t *testing.T) {
 	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
 	defer conn.Close()
 	stationDone := readStationUntilClosed(conn)
-	session, _ := server.Session("CP-001")
+	session := waitForSession(t, server, "CP-001")
 	select {
 	case <-session.Done():
 	case <-time.After(time.Second):
@@ -85,7 +82,7 @@ func TestShutdownClosesSessionsAndRejectsConnections(t *testing.T) {
 	defer httpServer.Close()
 	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
 	defer conn.Close()
-	session, _ := server.Session("CP-001")
+	session := waitForSession(t, server, "CP-001")
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -110,11 +107,16 @@ func TestShutdownClosesSessionsAndRejectsConnections(t *testing.T) {
 }
 
 func TestNewRejectsInvalidLifecycleTimeouts(t *testing.T) {
-	if _, err := New(Config{PingInterval: time.Second, PongTimeout: time.Second}); !errors.Is(err, ErrInvalidConfiguration) {
-		t.Fatalf("error = %v, want ErrInvalidConfiguration", err)
+	tests := []Config{
+		{PingInterval: time.Second, PongTimeout: time.Second},
+		{IdleTimeout: -time.Second},
+		{ReadLimit: -1},
+		{HandshakeTimeout: -time.Second},
 	}
-	if _, err := New(Config{IdleTimeout: -time.Second}); !errors.Is(err, ErrInvalidConfiguration) {
-		t.Fatalf("error = %v, want ErrInvalidConfiguration", err)
+	for _, config := range tests {
+		if _, err := New(config); !errors.Is(err, ErrInvalidConfiguration) {
+			t.Fatalf("config = %+v, error = %v, want ErrInvalidConfiguration", config, err)
+		}
 	}
 }
 
@@ -126,10 +128,7 @@ func TestAbruptDisconnectAllowsSameIdentityToReconnect(t *testing.T) {
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
 	first := dialTestStation(t, httpServer.URL, protocol.OCPP201)
-	firstSession, ok := server.Session("CP-001")
-	if !ok {
-		t.Fatal("first session not registered")
-	}
+	firstSession := waitForSession(t, server, "CP-001")
 	if err := first.UnderlyingConn().Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -148,8 +147,8 @@ func TestAbruptDisconnectAllowsSameIdentityToReconnect(t *testing.T) {
 
 	second := dialTestStation(t, httpServer.URL, protocol.OCPP201)
 	defer second.Close()
-	secondSession, ok := server.Session("CP-001")
-	if !ok || secondSession == firstSession {
+	secondSession := waitForSession(t, server, "CP-001")
+	if secondSession == firstSession {
 		t.Fatal("same identity did not reconnect with a new session")
 	}
 }

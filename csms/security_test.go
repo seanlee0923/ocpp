@@ -49,10 +49,7 @@ func TestBasicAuthenticationStoresPrincipalWithoutCredentials(t *testing.T) {
 	header := basicHeader("CP-001", "secret")
 	conn := dialStationWithHeader(t, httpServer.URL, protocol.OCPP16, header)
 	defer conn.Close()
-	session, ok := server.Session("CP-001")
-	if !ok {
-		t.Fatal("authenticated session not registered")
-	}
+	session := waitForSession(t, server, "CP-001")
 	principal := session.Principal()
 	if principal.ID != "station:CP-001" || principal.Attributes["tenant"] != "one" {
 		t.Fatalf("principal = %#v", principal)

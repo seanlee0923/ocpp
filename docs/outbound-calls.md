@@ -6,7 +6,7 @@ CSMS가 Charging Station으로 시작하는 요청은 profile method 또는 `csm
 confirmation, err := csms.Call[v201.ResetRequest, v201.ResetConfirmation](
     ctx,
     session,
-    v201.ResetRequest{Type: v201.ResetRequestTypeImmediate},
+    v201.ResetRequest{Type: v201.ResetRequestResetEnumImmediate},
 )
 ```
 
@@ -29,3 +29,6 @@ if errors.As(err, &remote) {
 기본 unique ID는 `uuid.NewString`이다. 사용자 generator는 `Config.UniqueIDGenerator`로
 주입할 수 있다. panic, 빈 값, 36자 초과는 `ErrUniqueIDGeneration`, 같은 세션의 in-flight
 중복은 `ErrDuplicateUniqueID`로 반환된다.
+
+BootNotification 이후 실제 session으로 Reset을 호출하는 흐름은
+[`examples/outbound-call`](../examples/outbound-call)에 있다.

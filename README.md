@@ -425,7 +425,8 @@ Session에는 비밀번호 대신 `Principal`만 저장합니다.
 이후에는 같은 major version 안에서 기존 공개 API의 source compatibility를 유지합니다.
 
 `csms.Config`는 keyed field literal로 생성하는 것을 권장합니다. duration과 limit의 0 값은
-기본값을 선택하고 음수는 `csms.ErrInvalidConfiguration`으로 거부됩니다.
+문서화된 기본값을 선택하지만 `IdleTimeout: 0`은 idle 감지를 비활성화합니다. 음수 duration과
+limit은 `csms.ErrInvalidConfiguration`으로 거부됩니다.
 `Server.Shutdown`은 여러 번 호출해도 안전하지만 종료 후 서버를 다시 시작할 수는 없습니다.
 
 애플리케이션은 raw WebSocket frame을 직접 전송하지 않고 `csms.Call` 또는 버전별 profile의
