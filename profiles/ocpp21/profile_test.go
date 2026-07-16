@@ -101,7 +101,7 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var transactions, reports, clearedLimits, schedulePulls, derStarts, tariffGets, batterySwaps, firmwareStatuses atomic.Int32
+	var transactions, reports, clearedLimits, schedulePulls, derStarts, tariffGets, batterySwaps, firmwareStatuses, streamOpens atomic.Int32
 	if err := profile.HandleBootNotification(func(context.Context, *csms.Session, v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error) {
 		return v21.BootNotificationConfirmation{CurrentTime: "2026-07-16T00:00:00Z", Interval: 300, Status: v21.BootNotificationConfirmationRegistrationStatusEnumAccepted}, nil
 	}); err != nil {
@@ -173,6 +173,15 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 		}
 		firmwareStatuses.Add(1)
 		return v21.FirmwareStatusNotificationConfirmation{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.HandleOpenPeriodicEventStream(func(_ context.Context, _ *csms.Session, request v21.OpenPeriodicEventStreamRequest) (v21.OpenPeriodicEventStreamConfirmation, error) {
+		if request.ConstantStreamData.ID != 41 {
+			t.Errorf("stream ID = %d", request.ConstantStreamData.ID)
+		}
+		streamOpens.Add(1)
+		return v21.OpenPeriodicEventStreamConfirmation{Status: v21.OpenPeriodicEventStreamConfirmationGenericStatusEnumAccepted}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -413,14 +422,18 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 		t.Fatal("timed out waiting for RequestBatterySwap confirmation")
 	}
 
-	streamResult := make(chan v21.OpenPeriodicEventStreamConfirmation, 1)
+	sendCall(t, conn, "open-stream", v21.OpenPeriodicEventStreamRequest{ConstantStreamData: v21.OpenPeriodicEventStreamRequestConstantStreamData{
+		ID: 41, VariableMonitoringID: 410, Params: v21.OpenPeriodicEventStreamRequestPeriodicEventStreamParams{},
+	}})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("OpenPeriodicEventStream response type = %d", response.Type())
+	}
+	interval := 10
+	streamResult := make(chan v21.AdjustPeriodicEventStreamConfirmation, 1)
 	streamError := make(chan error, 1)
 	go func() {
-		confirmation, err := profile.CallOpenPeriodicEventStream(context.Background(), session, v21.OpenPeriodicEventStreamRequest{
-			ConstantStreamData: v21.OpenPeriodicEventStreamRequestConstantStreamData{
-				ID: 41, VariableMonitoringID: 410,
-				Params: v21.OpenPeriodicEventStreamRequestPeriodicEventStreamParams{},
-			},
+		confirmation, err := profile.CallAdjustPeriodicEventStream(context.Background(), session, v21.AdjustPeriodicEventStreamRequest{
+			ID: 41, Params: v21.AdjustPeriodicEventStreamRequestPeriodicEventStreamParams{Interval: &interval},
 		})
 		if err != nil {
 			streamError <- err
@@ -429,19 +442,19 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 		streamResult <- confirmation
 	}()
 	outbound = readMessage(t, conn).(protocol.Call)
-	if outbound.Action != "OpenPeriodicEventStream" {
+	if outbound.Action != "AdjustPeriodicEventStream" {
 		t.Fatalf("outbound action = %q", outbound.Action)
 	}
-	sendCallResult(t, conn, outbound.ID, v21.OpenPeriodicEventStreamConfirmation{Status: v21.OpenPeriodicEventStreamConfirmationGenericStatusEnumAccepted})
+	sendCallResult(t, conn, outbound.ID, v21.AdjustPeriodicEventStreamConfirmation{Status: v21.AdjustPeriodicEventStreamConfirmationGenericStatusEnumAccepted})
 	select {
 	case err := <-streamError:
 		t.Fatal(err)
 	case confirmation := <-streamResult:
-		if confirmation.Status != v21.OpenPeriodicEventStreamConfirmationGenericStatusEnumAccepted {
+		if confirmation.Status != v21.AdjustPeriodicEventStreamConfirmationGenericStatusEnumAccepted {
 			t.Fatalf("status = %q", confirmation.Status)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for OpenPeriodicEventStream confirmation")
+		t.Fatal("timed out waiting for AdjustPeriodicEventStream confirmation")
 	}
 
 	certificateResult := make(chan v21.GetCertificateChainStatusConfirmation, 1)
@@ -478,8 +491,8 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for GetCertificateChainStatus confirmation")
 	}
-	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 || tariffGets.Load() != 1 || batterySwaps.Load() != 1 || firmwareStatuses.Load() != 1 {
-		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d tariffGets=%d batterySwaps=%d firmwareStatuses=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load(), tariffGets.Load(), batterySwaps.Load(), firmwareStatuses.Load())
+	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 || tariffGets.Load() != 1 || batterySwaps.Load() != 1 || firmwareStatuses.Load() != 1 || streamOpens.Load() != 1 {
+		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d tariffGets=%d batterySwaps=%d firmwareStatuses=%d streamOpens=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load(), tariffGets.Load(), batterySwaps.Load(), firmwareStatuses.Load(), streamOpens.Load())
 	}
 }
 

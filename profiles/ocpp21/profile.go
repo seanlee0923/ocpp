@@ -48,6 +48,8 @@ type NotifyWebPaymentStartedHandler func(context.Context, *csms.Session, v21.Not
 type VatNumberValidationHandler func(context.Context, *csms.Session, v21.VatNumberValidationRequest) (v21.VatNumberValidationConfirmation, error)
 type BatterySwapHandler func(context.Context, *csms.Session, v21.BatterySwapRequest) (v21.BatterySwapConfirmation, error)
 type NotifyPeriodicEventStreamHandler func(context.Context, *csms.Session, v21.NotifyPeriodicEventStreamRequest) error
+type OpenPeriodicEventStreamHandler func(context.Context, *csms.Session, v21.OpenPeriodicEventStreamRequest) (v21.OpenPeriodicEventStreamConfirmation, error)
+type ClosePeriodicEventStreamHandler func(context.Context, *csms.Session, v21.ClosePeriodicEventStreamRequest) (v21.ClosePeriodicEventStreamConfirmation, error)
 type SignCertificateHandler func(context.Context, *csms.Session, v21.SignCertificateRequest) (v21.SignCertificateConfirmation, error)
 type Get15118EVCertificateHandler func(context.Context, *csms.Session, v21.Get15118EVCertificateRequest) (v21.Get15118EVCertificateConfirmation, error)
 type GetCertificateStatusHandler func(context.Context, *csms.Session, v21.GetCertificateStatusRequest) (v21.GetCertificateStatusConfirmation, error)
@@ -163,6 +165,12 @@ func (profile *Profile) HandleBatterySwap(handler BatterySwapHandler) error {
 }
 func (profile *Profile) HandleNotifyPeriodicEventStream(handler NotifyPeriodicEventStreamHandler) error {
 	return csms.HandleSend(profile.router, csms.TypedSendHandler[v21.NotifyPeriodicEventStreamRequest](handler))
+}
+func (profile *Profile) HandleOpenPeriodicEventStream(handler OpenPeriodicEventStreamHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.OpenPeriodicEventStreamRequest, v21.OpenPeriodicEventStreamConfirmation](handler))
+}
+func (profile *Profile) HandleClosePeriodicEventStream(handler ClosePeriodicEventStreamHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.ClosePeriodicEventStreamRequest, v21.ClosePeriodicEventStreamConfirmation](handler))
 }
 func (profile *Profile) HandleSignCertificate(handler SignCertificateHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.SignCertificateRequest, v21.SignCertificateConfirmation](handler))
@@ -300,12 +308,6 @@ func (profile *Profile) CallRequestBatterySwap(ctx context.Context, session *csm
 	}
 	return csms.Call[v21.RequestBatterySwapRequest, v21.RequestBatterySwapConfirmation](ctx, session, request)
 }
-func (profile *Profile) CallOpenPeriodicEventStream(ctx context.Context, session *csms.Session, request v21.OpenPeriodicEventStreamRequest) (v21.OpenPeriodicEventStreamConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.OpenPeriodicEventStreamConfirmation{}, err
-	}
-	return csms.Call[v21.OpenPeriodicEventStreamRequest, v21.OpenPeriodicEventStreamConfirmation](ctx, session, request)
-}
 func (profile *Profile) CallGetPeriodicEventStream(ctx context.Context, session *csms.Session, request v21.GetPeriodicEventStreamRequest) (v21.GetPeriodicEventStreamConfirmation, error) {
 	if err := profile.requireBooted(session); err != nil {
 		return v21.GetPeriodicEventStreamConfirmation{}, err
@@ -317,12 +319,6 @@ func (profile *Profile) CallAdjustPeriodicEventStream(ctx context.Context, sessi
 		return v21.AdjustPeriodicEventStreamConfirmation{}, err
 	}
 	return csms.Call[v21.AdjustPeriodicEventStreamRequest, v21.AdjustPeriodicEventStreamConfirmation](ctx, session, request)
-}
-func (profile *Profile) CallClosePeriodicEventStream(ctx context.Context, session *csms.Session, request v21.ClosePeriodicEventStreamRequest) (v21.ClosePeriodicEventStreamConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.ClosePeriodicEventStreamConfirmation{}, err
-	}
-	return csms.Call[v21.ClosePeriodicEventStreamRequest, v21.ClosePeriodicEventStreamConfirmation](ctx, session, request)
 }
 func (profile *Profile) CallCertificateSigned(ctx context.Context, session *csms.Session, request v21.CertificateSignedRequest) (v21.CertificateSignedConfirmation, error) {
 	if err := profile.requireBooted(session); err != nil {
