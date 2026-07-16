@@ -560,6 +560,142 @@ func TestNotifyPeriodicEventStreamUsesUnconfirmedSend(t *testing.T) {
 	}
 }
 
+func TestCorrectedDirectionAndExtendedControlRoundTrips(t *testing.T) {
+	router := csms.NewRouter()
+	profile, err := NewProfile(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.HandleBootNotification(func(context.Context, *csms.Session, v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error) {
+		return v21.BootNotificationConfirmation{CurrentTime: "2026-07-16T00:00:00Z", Interval: 300, Status: v21.BootNotificationConfirmationRegistrationStatusEnumAccepted}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan int, 1)
+	if err := profile.HandleClosePeriodicEventStream(func(_ context.Context, _ *csms.Session, request v21.ClosePeriodicEventStreamRequest) (v21.ClosePeriodicEventStreamConfirmation, error) {
+		closed <- request.ID
+		return v21.ClosePeriodicEventStreamConfirmation{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	derReports := make(chan int, 1)
+	if err := profile.HandleReportDERControl(func(_ context.Context, _ *csms.Session, request v21.ReportDERControlRequest) (v21.ReportDERControlConfirmation, error) {
+		derReports <- request.RequestID
+		return v21.ReportDERControlConfirmation{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	derAlarms := make(chan v21.NotifyDERAlarmRequestDERControlEnum, 1)
+	if err := profile.HandleNotifyDERAlarm(func(_ context.Context, _ *csms.Session, request v21.NotifyDERAlarmRequest) (v21.NotifyDERAlarmConfirmation, error) {
+		derAlarms <- request.ControlType
+		return v21.NotifyDERAlarmConfirmation{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP21}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	dialer := websocket.Dialer{Subprotocols: []string{string(protocol.OCPP21)}}
+	conn, _, err := dialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/CP-21-controls", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	sendCall(t, conn, "boot", v21.BootNotificationRequest{
+		Reason:          v21.BootNotificationRequestBootReasonEnumPowerUp,
+		ChargingStation: v21.BootNotificationRequestChargingStation{Model: "AC-22K", VendorName: "Example"},
+	})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("BootNotification response type = %d", response.Type())
+	}
+	session, ok := server.Session("CP-21-controls")
+	if !ok {
+		t.Fatal("session not found")
+	}
+
+	assertOutboundRoundTrip(t, conn, "NotifyAllowedEnergyTransfer", func() (v21.NotifyAllowedEnergyTransferConfirmation, error) {
+		return profile.CallNotifyAllowedEnergyTransfer(context.Background(), session, v21.NotifyAllowedEnergyTransferRequest{
+			TransactionID: "TX-21", AllowedEnergyTransfer: []v21.NotifyAllowedEnergyTransferRequestEnergyTransferModeEnum{v21.NotifyAllowedEnergyTransferRequestEnergyTransferModeEnumACBPT},
+		})
+	}, v21.NotifyAllowedEnergyTransferConfirmation{Status: v21.NotifyAllowedEnergyTransferConfirmationNotifyAllowedEnergyTransferStatusEnumAccepted})
+
+	assertOutboundRoundTrip(t, conn, "NotifyWebPaymentStarted", func() (v21.NotifyWebPaymentStartedConfirmation, error) {
+		return profile.CallNotifyWebPaymentStarted(context.Background(), session, v21.NotifyWebPaymentStartedRequest{EVSEID: 1, Timeout: 60})
+	}, v21.NotifyWebPaymentStartedConfirmation{})
+
+	limit := 22.0
+	assertOutboundRoundTrip(t, conn, "UpdateDynamicSchedule", func() (v21.UpdateDynamicScheduleConfirmation, error) {
+		return profile.CallUpdateDynamicSchedule(context.Background(), session, v21.UpdateDynamicScheduleRequest{
+			ChargingProfileID: 21, ScheduleUpdate: v21.UpdateDynamicScheduleRequestChargingScheduleUpdate{Limit: &limit},
+		})
+	}, v21.UpdateDynamicScheduleConfirmation{Status: v21.UpdateDynamicScheduleConfirmationChargingProfileStatusEnumAccepted})
+
+	assertOutboundRoundTrip(t, conn, "AFRRSignal", func() (v21.AFRRSignalConfirmation, error) {
+		return profile.CallAFRRSignal(context.Background(), session, v21.AFRRSignalRequest{Timestamp: "2026-07-16T00:01:00Z", Signal: 10})
+	}, v21.AFRRSignalConfirmation{Status: v21.AFRRSignalConfirmationGenericStatusEnumAccepted})
+
+	assertOutboundRoundTrip(t, conn, "SetDERControl", func() (v21.SetDERControlConfirmation, error) {
+		return profile.CallSetDERControl(context.Background(), session, v21.SetDERControlRequest{
+			ControlID: "DER-gradient", ControlType: v21.SetDERControlRequestDERControlEnumGradients,
+			Gradient: &v21.SetDERControlRequestGradient{Priority: 1, Gradient: 2, SoftGradient: 1},
+		})
+	}, v21.SetDERControlConfirmation{Status: v21.SetDERControlConfirmationDERControlStatusEnumAccepted})
+
+	assertOutboundRoundTrip(t, conn, "GetDERControl", func() (v21.GetDERControlConfirmation, error) {
+		return profile.CallGetDERControl(context.Background(), session, v21.GetDERControlRequest{RequestID: 22})
+	}, v21.GetDERControlConfirmation{Status: v21.GetDERControlConfirmationDERControlStatusEnumAccepted})
+
+	assertOutboundRoundTrip(t, conn, "GetPeriodicEventStream", func() (v21.GetPeriodicEventStreamConfirmation, error) {
+		return profile.CallGetPeriodicEventStream(context.Background(), session, v21.GetPeriodicEventStreamRequest{})
+	}, v21.GetPeriodicEventStreamConfirmation{})
+
+	sendCall(t, conn, "close-stream", v21.ClosePeriodicEventStreamRequest{ID: 41})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("ClosePeriodicEventStream response type = %d", response.Type())
+	}
+	select {
+	case id := <-closed:
+		if id != 41 {
+			t.Fatalf("closed stream ID = %d", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ClosePeriodicEventStream handler")
+	}
+
+	sendCall(t, conn, "report-der", v21.ReportDERControlRequest{RequestID: 23})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("ReportDERControl response type = %d", response.Type())
+	}
+	select {
+	case requestID := <-derReports:
+		if requestID != 23 {
+			t.Fatalf("DER report request ID = %d", requestID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ReportDERControl handler")
+	}
+
+	sendCall(t, conn, "der-alarm", v21.NotifyDERAlarmRequest{
+		ControlType: v21.NotifyDERAlarmRequestDERControlEnumGradients, Timestamp: "2026-07-16T00:02:00Z",
+	})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("NotifyDERAlarm response type = %d", response.Type())
+	}
+	select {
+	case controlType := <-derAlarms:
+		if controlType != v21.NotifyDERAlarmRequestDERControlEnumGradients {
+			t.Fatalf("DER alarm control type = %q", controlType)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for NotifyDERAlarm handler")
+	}
+}
+
 func TestNewProfileRejectsNilRouterAndHandler(t *testing.T) {
 	if _, err := NewProfile(nil); err == nil {
 		t.Fatal("NewProfile(nil) succeeded")
@@ -600,6 +736,41 @@ func sendCallResult(t *testing.T, conn *websocket.Conn, id string, payload proto
 	}
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertOutboundRoundTrip[Confirmation protocol.Payload](
+	t *testing.T,
+	conn *websocket.Conn,
+	action string,
+	invoke func() (Confirmation, error),
+	response Confirmation,
+) {
+	t.Helper()
+	result := make(chan Confirmation, 1)
+	errResult := make(chan error, 1)
+	go func() {
+		confirmation, err := invoke()
+		if err != nil {
+			errResult <- err
+			return
+		}
+		result <- confirmation
+	}()
+	outbound, ok := readMessage(t, conn).(protocol.Call)
+	if !ok {
+		t.Fatal("outbound message is not CALL")
+	}
+	if outbound.Action != action {
+		t.Fatalf("outbound action = %q, want %q", outbound.Action, action)
+	}
+	sendCallResult(t, conn, outbound.ID, response)
+	select {
+	case err := <-errResult:
+		t.Fatal(err)
+	case <-result:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s confirmation", action)
 	}
 }
 
