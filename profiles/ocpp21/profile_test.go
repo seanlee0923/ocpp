@@ -101,7 +101,7 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var transactions, reports, clearedLimits, schedulePulls, derStarts, tariffGets, batterySwaps atomic.Int32
+	var transactions, reports, clearedLimits, schedulePulls, derStarts, tariffGets, batterySwaps, firmwareStatuses atomic.Int32
 	if err := profile.HandleBootNotification(func(context.Context, *csms.Session, v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error) {
 		return v21.BootNotificationConfirmation{CurrentTime: "2026-07-16T00:00:00Z", Interval: 300, Status: v21.BootNotificationConfirmationRegistrationStatusEnumAccepted}, nil
 	}); err != nil {
@@ -164,6 +164,15 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 		}
 		batterySwaps.Add(1)
 		return v21.BatterySwapConfirmation{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.HandleFirmwareStatusNotification(func(_ context.Context, _ *csms.Session, request v21.FirmwareStatusNotificationRequest) (v21.FirmwareStatusNotificationConfirmation, error) {
+		if request.Status != v21.FirmwareStatusNotificationRequestFirmwareStatusEnumInstalled {
+			t.Errorf("firmware status = %q", request.Status)
+		}
+		firmwareStatuses.Add(1)
+		return v21.FirmwareStatusNotificationConfirmation{}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +245,10 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	})
 	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
 		t.Fatalf("BatterySwap response type = %d", response.Type())
+	}
+	sendCall(t, conn, "firmware-status", v21.FirmwareStatusNotificationRequest{Status: v21.FirmwareStatusNotificationRequestFirmwareStatusEnumInstalled})
+	if response := readMessage(t, conn); response.Type() != protocol.CallResultType {
+		t.Fatalf("FirmwareStatusNotification response type = %d", response.Type())
 	}
 
 	variableResult := make(chan v21.GetVariablesConfirmation, 1)
@@ -430,8 +443,43 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for OpenPeriodicEventStream confirmation")
 	}
-	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 || tariffGets.Load() != 1 || batterySwaps.Load() != 1 {
-		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d tariffGets=%d batterySwaps=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load(), tariffGets.Load(), batterySwaps.Load())
+
+	certificateResult := make(chan v21.GetCertificateChainStatusConfirmation, 1)
+	certificateError := make(chan error, 1)
+	go func() {
+		confirmation, err := profile.CallGetCertificateChainStatus(context.Background(), session, v21.GetCertificateChainStatusRequest{CertificateStatusRequests: []v21.GetCertificateChainStatusRequestCertificateStatusRequestInfo{{
+			Source:              v21.GetCertificateChainStatusRequestCertificateStatusSourceEnumOCSP,
+			Urls:                []string{"https://ocsp.example.com"},
+			CertificateHashData: v21.GetCertificateChainStatusRequestCertificateHashData{HashAlgorithm: v21.GetCertificateChainStatusRequestHashAlgorithmEnumSHA256, IssuerNameHash: "name", IssuerKeyHash: "key", SerialNumber: "01"},
+		}}})
+		if err != nil {
+			certificateError <- err
+			return
+		}
+		certificateResult <- confirmation
+	}()
+	outbound = readMessage(t, conn).(protocol.Call)
+	if outbound.Action != "GetCertificateChainStatus" {
+		t.Fatalf("outbound action = %q", outbound.Action)
+	}
+	sendCallResult(t, conn, outbound.ID, v21.GetCertificateChainStatusConfirmation{CertificateStatus: []v21.GetCertificateChainStatusConfirmationCertificateStatus{{
+		Source:              v21.GetCertificateChainStatusConfirmationCertificateStatusSourceEnumOCSP,
+		Status:              v21.GetCertificateChainStatusConfirmationCertificateStatusEnumGood,
+		NextUpdate:          "2026-07-17T00:00:00Z",
+		CertificateHashData: v21.GetCertificateChainStatusConfirmationCertificateHashData{HashAlgorithm: v21.GetCertificateChainStatusConfirmationHashAlgorithmEnumSHA256, IssuerNameHash: "name", IssuerKeyHash: "key", SerialNumber: "01"},
+	}}})
+	select {
+	case err := <-certificateError:
+		t.Fatal(err)
+	case confirmation := <-certificateResult:
+		if len(confirmation.CertificateStatus) != 1 || confirmation.CertificateStatus[0].Status != v21.GetCertificateChainStatusConfirmationCertificateStatusEnumGood {
+			t.Fatalf("certificate status = %#v", confirmation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for GetCertificateChainStatus confirmation")
+	}
+	if transactions.Load() != 3 || reports.Load() != 1 || clearedLimits.Load() != 1 || schedulePulls.Load() != 1 || derStarts.Load() != 1 || tariffGets.Load() != 1 || batterySwaps.Load() != 1 || firmwareStatuses.Load() != 1 {
+		t.Fatalf("transactions=%d reports=%d clearedLimits=%d schedulePulls=%d derStarts=%d tariffGets=%d batterySwaps=%d firmwareStatuses=%d", transactions.Load(), reports.Load(), clearedLimits.Load(), schedulePulls.Load(), derStarts.Load(), tariffGets.Load(), batterySwaps.Load(), firmwareStatuses.Load())
 	}
 }
 

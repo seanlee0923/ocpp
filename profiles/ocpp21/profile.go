@@ -48,6 +48,11 @@ type NotifyWebPaymentStartedHandler func(context.Context, *csms.Session, v21.Not
 type VatNumberValidationHandler func(context.Context, *csms.Session, v21.VatNumberValidationRequest) (v21.VatNumberValidationConfirmation, error)
 type BatterySwapHandler func(context.Context, *csms.Session, v21.BatterySwapRequest) (v21.BatterySwapConfirmation, error)
 type NotifyPeriodicEventStreamHandler func(context.Context, *csms.Session, v21.NotifyPeriodicEventStreamRequest) error
+type SignCertificateHandler func(context.Context, *csms.Session, v21.SignCertificateRequest) (v21.SignCertificateConfirmation, error)
+type Get15118EVCertificateHandler func(context.Context, *csms.Session, v21.Get15118EVCertificateRequest) (v21.Get15118EVCertificateConfirmation, error)
+type GetCertificateStatusHandler func(context.Context, *csms.Session, v21.GetCertificateStatusRequest) (v21.GetCertificateStatusConfirmation, error)
+type FirmwareStatusNotificationHandler func(context.Context, *csms.Session, v21.FirmwareStatusNotificationRequest) (v21.FirmwareStatusNotificationConfirmation, error)
+type PublishFirmwareStatusNotificationHandler func(context.Context, *csms.Session, v21.PublishFirmwareStatusNotificationRequest) (v21.PublishFirmwareStatusNotificationConfirmation, error)
 
 type sessionState struct{ registration atomic.Uint32 }
 
@@ -158,6 +163,21 @@ func (profile *Profile) HandleBatterySwap(handler BatterySwapHandler) error {
 }
 func (profile *Profile) HandleNotifyPeriodicEventStream(handler NotifyPeriodicEventStreamHandler) error {
 	return csms.HandleSend(profile.router, csms.TypedSendHandler[v21.NotifyPeriodicEventStreamRequest](handler))
+}
+func (profile *Profile) HandleSignCertificate(handler SignCertificateHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.SignCertificateRequest, v21.SignCertificateConfirmation](handler))
+}
+func (profile *Profile) HandleGet15118EVCertificate(handler Get15118EVCertificateHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.Get15118EVCertificateRequest, v21.Get15118EVCertificateConfirmation](handler))
+}
+func (profile *Profile) HandleGetCertificateStatus(handler GetCertificateStatusHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.GetCertificateStatusRequest, v21.GetCertificateStatusConfirmation](handler))
+}
+func (profile *Profile) HandleFirmwareStatusNotification(handler FirmwareStatusNotificationHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.FirmwareStatusNotificationRequest, v21.FirmwareStatusNotificationConfirmation](handler))
+}
+func (profile *Profile) HandlePublishFirmwareStatusNotification(handler PublishFirmwareStatusNotificationHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.PublishFirmwareStatusNotificationRequest, v21.PublishFirmwareStatusNotificationConfirmation](handler))
 }
 
 func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {
@@ -303,6 +323,54 @@ func (profile *Profile) CallClosePeriodicEventStream(ctx context.Context, sessio
 		return v21.ClosePeriodicEventStreamConfirmation{}, err
 	}
 	return csms.Call[v21.ClosePeriodicEventStreamRequest, v21.ClosePeriodicEventStreamConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallCertificateSigned(ctx context.Context, session *csms.Session, request v21.CertificateSignedRequest) (v21.CertificateSignedConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.CertificateSignedConfirmation{}, err
+	}
+	return csms.Call[v21.CertificateSignedRequest, v21.CertificateSignedConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallInstallCertificate(ctx context.Context, session *csms.Session, request v21.InstallCertificateRequest) (v21.InstallCertificateConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.InstallCertificateConfirmation{}, err
+	}
+	return csms.Call[v21.InstallCertificateRequest, v21.InstallCertificateConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallDeleteCertificate(ctx context.Context, session *csms.Session, request v21.DeleteCertificateRequest) (v21.DeleteCertificateConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.DeleteCertificateConfirmation{}, err
+	}
+	return csms.Call[v21.DeleteCertificateRequest, v21.DeleteCertificateConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallGetInstalledCertificateIds(ctx context.Context, session *csms.Session, request v21.GetInstalledCertificateIdsRequest) (v21.GetInstalledCertificateIdsConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.GetInstalledCertificateIdsConfirmation{}, err
+	}
+	return csms.Call[v21.GetInstalledCertificateIdsRequest, v21.GetInstalledCertificateIdsConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallGetCertificateChainStatus(ctx context.Context, session *csms.Session, request v21.GetCertificateChainStatusRequest) (v21.GetCertificateChainStatusConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.GetCertificateChainStatusConfirmation{}, err
+	}
+	return csms.Call[v21.GetCertificateChainStatusRequest, v21.GetCertificateChainStatusConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallUpdateFirmware(ctx context.Context, session *csms.Session, request v21.UpdateFirmwareRequest) (v21.UpdateFirmwareConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.UpdateFirmwareConfirmation{}, err
+	}
+	return csms.Call[v21.UpdateFirmwareRequest, v21.UpdateFirmwareConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallPublishFirmware(ctx context.Context, session *csms.Session, request v21.PublishFirmwareRequest) (v21.PublishFirmwareConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.PublishFirmwareConfirmation{}, err
+	}
+	return csms.Call[v21.PublishFirmwareRequest, v21.PublishFirmwareConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallUnpublishFirmware(ctx context.Context, session *csms.Session, request v21.UnpublishFirmwareRequest) (v21.UnpublishFirmwareConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.UnpublishFirmwareConfirmation{}, err
+	}
+	return csms.Call[v21.UnpublishFirmwareRequest, v21.UnpublishFirmwareConfirmation](ctx, session, request)
 }
 
 func (profile *Profile) requireBooted(session *csms.Session) error {
