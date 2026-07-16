@@ -44,9 +44,13 @@ const (
 	MaxErrorDescriptionLength = 255
 )
 
+// Message is implemented by the four OCPP-J wire frame types Call,
+// CallResult, CallError, and Send. It is sealed because Encode cannot safely
+// serialize arbitrary external implementations.
 type Message interface {
 	Type() MessageTypeID
 	UniqueID() string
+	ocppMessage()
 }
 
 // Payload is implemented by every generated OCPP request and confirmation.
@@ -84,9 +88,11 @@ type Send struct {
 
 func (m Call) Type() MessageTypeID { return CallType }
 func (m Call) UniqueID() string    { return m.ID }
+func (Call) ocppMessage()          {}
 
 func (m Send) Type() MessageTypeID { return SendType }
 func (m Send) UniqueID() string    { return m.ID }
+func (Send) ocppMessage()          {}
 
 type CallResult struct {
 	ID      string
@@ -95,6 +101,7 @@ type CallResult struct {
 
 func (m CallResult) Type() MessageTypeID { return CallResultType }
 func (m CallResult) UniqueID() string    { return m.ID }
+func (CallResult) ocppMessage()          {}
 
 type CallError struct {
 	ID          string
@@ -105,6 +112,7 @@ type CallError struct {
 
 func (m CallError) Type() MessageTypeID { return CallErrorType }
 func (m CallError) UniqueID() string    { return m.ID }
+func (CallError) ocppMessage()          {}
 
 func Decode(data []byte) (Message, error) {
 	if err := validateJSONSyntax(data); err != nil {

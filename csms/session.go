@@ -20,6 +20,7 @@ var (
 	ErrPongTimeout         = errors.New("WebSocket pong timeout")
 	ErrIdleTimeout         = errors.New("OCPP session idle timeout")
 	ErrTooManyPendingCalls = errors.New("too many pending OCPP calls")
+	ErrDuplicateUniqueID   = errors.New("duplicate OCPP unique ID")
 )
 
 type SessionState uint32
@@ -35,6 +36,9 @@ type callOutcome struct {
 	err    error
 }
 
+// Session represents one server-owned Charging Station WebSocket connection.
+// Applications may inspect it, close it, and pass it to Call or typed profile
+// methods. Raw frame writes are intentionally not exposed.
 type Session struct {
 	identity          string
 	version           protocol.Version
@@ -134,7 +138,7 @@ func (s *Session) registerCall(id string) (<-chan callOutcome, error) {
 		return nil, ErrTooManyPendingCalls
 	}
 	if _, exists := s.pending[id]; exists {
-		return nil, fmt.Errorf("duplicate OCPP unique ID %q", id)
+		return nil, fmt.Errorf("%w %q", ErrDuplicateUniqueID, id)
 	}
 	response := make(chan callOutcome, 1)
 	s.pending[id] = response
@@ -162,7 +166,7 @@ func (s *Session) resolve(message protocol.Message) bool {
 		response <- callOutcome{result: &value}
 	case protocol.CallError:
 		response <- callOutcome{err: &RemoteCallError{
-			Code: value.Code, Description: value.Description, Details: value.Details,
+			Code: ErrorCode(value.Code), Description: value.Description, Details: value.Details,
 		}}
 	default:
 		response <- callOutcome{err: fmt.Errorf("unexpected OCPP response type %d", message.Type())}
@@ -170,7 +174,9 @@ func (s *Session) resolve(message protocol.Message) bool {
 	return true
 }
 
-func (s *Session) Send(ctx context.Context, message protocol.Message) error {
+// send is the only raw frame write path. Public callers use Call or typed
+// profile methods so outbound CALLs are always registered and correlated.
+func (s *Session) send(ctx context.Context, message protocol.Message) error {
 	data, err := protocol.Encode(message)
 	if err != nil {
 		return err
@@ -208,7 +214,7 @@ func (s *Session) result(ctx context.Context, id string, payload any) error {
 	if err != nil {
 		return err
 	}
-	return s.Send(ctx, protocol.CallResult{ID: id, Payload: raw})
+	return s.send(ctx, protocol.CallResult{ID: id, Payload: raw})
 }
 
 func (s *Session) Close() error {

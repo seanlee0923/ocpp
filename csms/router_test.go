@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/seanlee0923/ocpp/protocol"
 	"github.com/seanlee0923/ocpp/v16"
@@ -29,8 +30,8 @@ func TestRouterHandleRejectsInvalidRegistration(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := test.router.Handle(test.version, test.action, test.handler); err == nil {
-				t.Fatal("Handle succeeded")
+			if err := test.router.Handle(test.version, test.action, test.handler); !errors.Is(err, ErrInvalidHandlerRegistration) {
+				t.Fatalf("Handle error = %v", err)
 			}
 		})
 	}
@@ -64,6 +65,53 @@ func TestRouterHandleAllowsSameActionForDifferentVersions(t *testing.T) {
 	}
 	if err := router.Handle(protocol.OCPP201, "Heartbeat", handler); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRouterZeroValueIsUsable(t *testing.T) {
+	var router Router
+	handler := func(context.Context, *Session, json.RawMessage) (any, error) { return nil, nil }
+	if err := router.Handle(protocol.OCPP16, "Heartbeat", handler); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := router.lookup(protocol.OCPP16, "Heartbeat"); !ok {
+		t.Fatal("zero-value router did not retain handler")
+	}
+}
+
+func TestRouterMiddlewareRunsOutsideLock(t *testing.T) {
+	router := NewRouter()
+	router.Use(func(_ protocol.Version, _ string, next Handler) Handler {
+		router.Use(func(_ protocol.Version, _ string, nested Handler) Handler { return nested })
+		return next
+	})
+	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *Session, json.RawMessage) (any, error) {
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = router.lookup(protocol.OCPP16, "Heartbeat")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("middleware lookup deadlocked while updating router")
+	}
+}
+
+func TestRouterRejectsMiddlewareThatReturnsNilHandler(t *testing.T) {
+	router := NewRouter()
+	router.Use(func(protocol.Version, string, Handler) Handler { return nil })
+	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *Session, json.RawMessage) (any, error) {
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := router.lookup(protocol.OCPP16, "Heartbeat"); ok {
+		t.Fatal("nil middleware result was returned as an executable handler")
 	}
 }
 

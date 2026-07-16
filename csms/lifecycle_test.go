@@ -110,11 +110,11 @@ func TestShutdownClosesSessionsAndRejectsConnections(t *testing.T) {
 }
 
 func TestNewRejectsInvalidLifecycleTimeouts(t *testing.T) {
-	if _, err := New(Config{PingInterval: time.Second, PongTimeout: time.Second}); err == nil {
-		t.Fatal("New succeeded when pong timeout equals ping interval")
+	if _, err := New(Config{PingInterval: time.Second, PongTimeout: time.Second}); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("error = %v, want ErrInvalidConfiguration", err)
 	}
-	if _, err := New(Config{IdleTimeout: -time.Second}); err == nil {
-		t.Fatal("New succeeded with negative idle timeout")
+	if _, err := New(Config{IdleTimeout: -time.Second}); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("error = %v, want ErrInvalidConfiguration", err)
 	}
 }
 

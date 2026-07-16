@@ -107,6 +107,47 @@ func TestInboundHandlersApplyPerSessionBackpressure(t *testing.T) {
 	}
 }
 
+func TestHandlerPanicReturnsInternalErrorAndKeepsSessionAlive(t *testing.T) {
+	router := NewRouter()
+	if err := router.Handle(protocol.OCPP16, "Panic", func(context.Context, *Session, json.RawMessage) (any, error) {
+		panic("application failure")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *Session, json.RawMessage) (any, error) {
+		return map[string]any{"currentTime": "2026-07-16T00:00:00Z"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := dialTestStation(t, newTestHTTPServer(t, server).URL, protocol.OCPP16)
+	defer conn.Close()
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`[2,"panic-1","Panic",{}]`)); err != nil {
+		t.Fatal(err)
+	}
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := protocol.Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callError, ok := message.(protocol.CallError)
+	if !ok || callError.Code != string(InternalError) {
+		t.Fatalf("panic response = %#v", message)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`[2,"alive-1","Heartbeat",{}]`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("session did not survive handler panic: %v", err)
+	}
+}
+
 func TestShutdownCancelsAndWaitsForHandlers(t *testing.T) {
 	router := NewRouter()
 	started := make(chan struct{})

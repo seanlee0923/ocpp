@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/seanlee0923/ocpp/protocol"
 )
 
 // RemoteCallError is a CALLERROR returned by a Charging Station.
 type RemoteCallError struct {
-	Code        string
+	Code        ErrorCode
 	Description string
 	Details     json.RawMessage
 }
@@ -46,9 +47,9 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 	if err != nil {
 		return zero, fmt.Errorf("marshal outgoing %s request: %w", request.ActionName(), err)
 	}
-	id := session.uniqueIDGenerator()
-	if id == "" {
-		return zero, fmt.Errorf("unique ID generator returned an empty value")
+	id, err := generateUniqueID(session.uniqueIDGenerator)
+	if err != nil {
+		return zero, err
 	}
 	response, err := session.registerCall(id)
 	if err != nil {
@@ -62,7 +63,7 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 		callCtx, cancel = context.WithTimeout(ctx, session.callTimeout)
 	}
 	defer cancel()
-	if err := session.Send(callCtx, protocol.Call{ID: id, Action: request.ActionName(), Payload: payload}); err != nil {
+	if err := session.send(callCtx, protocol.Call{ID: id, Action: request.ActionName(), Payload: payload}); err != nil {
 		return zero, err
 	}
 
@@ -86,4 +87,21 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 		}
 		return zero, ErrSessionClosed
 	}
+}
+
+func generateUniqueID(generator UniqueIDGenerator) (id string, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			id = ""
+			err = fmt.Errorf("%w: generator panic: %v", ErrUniqueIDGeneration, recovered)
+		}
+	}()
+	if generator == nil {
+		return "", fmt.Errorf("%w: generator is nil", ErrUniqueIDGeneration)
+	}
+	id = generator()
+	if length := utf8.RuneCountInString(id); length == 0 || length > protocol.MaxUniqueIDLength {
+		return "", fmt.Errorf("%w: ID must contain 1 to %d characters", ErrUniqueIDGeneration, protocol.MaxUniqueIDLength)
+	}
+	return id, nil
 }

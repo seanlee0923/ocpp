@@ -16,6 +16,14 @@ import (
 	"github.com/seanlee0923/ocpp/protocol"
 )
 
+var (
+	ErrInvalidConfiguration = errors.New("invalid CSMS configuration")
+	ErrUniqueIDGeneration   = errors.New("OCPP unique ID generation failed")
+)
+
+// UniqueIDGenerator returns an OCPP-J unique ID of 1 to 36 characters.
+// Panics, empty IDs, overlong IDs, and duplicate in-flight IDs are converted
+// to errors by Call.
 type UniqueIDGenerator func() string
 
 type DuplicateSessionDecision uint8
@@ -60,6 +68,9 @@ type CallError struct {
 
 func (e *CallError) Error() string { return e.Description }
 
+// Config controls a CSMS Server. Construct it with keyed fields: new optional
+// fields may be added in backward-compatible releases. Zero duration and limit
+// values select documented defaults; negative values are rejected.
 type Config struct {
 	Router                *Router
 	Versions              []protocol.Version
@@ -97,7 +108,7 @@ type sessionEntry struct {
 
 func New(config Config) (*Server, error) {
 	if err := prepareSecurity(&config.Security); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrInvalidConfiguration, err)
 	}
 	if config.Router == nil {
 		config.Router = NewRouter()
@@ -107,7 +118,7 @@ func New(config Config) (*Server, error) {
 	}
 	for _, version := range config.Versions {
 		if !version.Valid() {
-			return nil, fmt.Errorf("invalid configured OCPP version %q", version)
+			return nil, fmt.Errorf("%w: invalid configured OCPP version %q", ErrInvalidConfiguration, version)
 		}
 	}
 	if config.ReadLimit == 0 {
@@ -120,19 +131,19 @@ func New(config Config) (*Server, error) {
 		config.CallTimeout = 30 * time.Second
 	}
 	if config.CallTimeout < 0 {
-		return nil, fmt.Errorf("call timeout must not be negative")
+		return nil, fmt.Errorf("%w: call timeout must not be negative", ErrInvalidConfiguration)
 	}
 	if config.MaxPendingCalls == 0 {
 		config.MaxPendingCalls = 100
 	}
 	if config.MaxPendingCalls < 0 {
-		return nil, fmt.Errorf("max pending calls must not be negative")
+		return nil, fmt.Errorf("%w: max pending calls must not be negative", ErrInvalidConfiguration)
 	}
 	if config.MaxConcurrentHandlers == 0 {
 		config.MaxConcurrentHandlers = 16
 	}
 	if config.MaxConcurrentHandlers < 0 {
-		return nil, fmt.Errorf("max concurrent handlers must not be negative")
+		return nil, fmt.Errorf("%w: max concurrent handlers must not be negative", ErrInvalidConfiguration)
 	}
 	if config.UniqueIDGenerator == nil {
 		config.UniqueIDGenerator = uuid.NewString
@@ -147,10 +158,10 @@ func New(config Config) (*Server, error) {
 		config.PongTimeout = 90 * time.Second
 	}
 	if config.WriteTimeout < 0 || config.PingInterval < 0 || config.PongTimeout < 0 || config.IdleTimeout < 0 {
-		return nil, fmt.Errorf("write, ping, pong and idle timeouts must not be negative")
+		return nil, fmt.Errorf("%w: write, ping, pong and idle timeouts must not be negative", ErrInvalidConfiguration)
 	}
 	if config.PingInterval > 0 && config.PongTimeout > 0 && config.PongTimeout <= config.PingInterval {
-		return nil, fmt.Errorf("pong timeout must be greater than ping interval")
+		return nil, fmt.Errorf("%w: pong timeout must be greater than ping interval", ErrInvalidConfiguration)
 	}
 	protocols := make([]string, len(config.Versions))
 	for i, version := range config.Versions {
@@ -308,7 +319,8 @@ func (s *Server) Sessions() []*Session {
 func (s *Server) SessionCount() int { return len(s.Sessions()) }
 
 // Shutdown rejects new connections, closes active sessions and waits until
-// they finish or ctx expires.
+// they finish or ctx expires. Shutdown is terminal; a Server cannot accept new
+// connections afterward. Repeated calls are safe.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.shuttingDown.Store(true)
 	s.sessionsMu.RLock()
@@ -468,7 +480,7 @@ func (s *Server) readLoop(session *Session) error {
 		if err != nil {
 			var unsupported *protocol.UnsupportedMessageTypeError
 			if session.version != protocol.OCPP16 && errors.As(err, &unsupported) {
-				_ = session.Send(session.Context(), protocol.CallError{
+				_ = session.send(session.Context(), protocol.CallError{
 					ID: unsupported.ID, Code: string(MessageTypeNotSupported),
 					Description: "message type is not supported", Details: json.RawMessage(`{}`),
 				})
@@ -486,7 +498,7 @@ func (s *Server) readLoop(session *Session) error {
 		case protocol.Send:
 			if session.version != protocol.OCPP21 {
 				if session.version == protocol.OCPP201 {
-					_ = session.Send(session.Context(), protocol.CallError{
+					_ = session.send(session.Context(), protocol.CallError{
 						ID: value.ID, Code: string(MessageTypeNotSupported),
 						Description: "SEND is only supported by OCPP 2.1", Details: json.RawMessage(`{}`),
 					})
@@ -511,6 +523,12 @@ func (s *Server) readLoop(session *Session) error {
 func (s *Server) handleSend(ctx context.Context, session *Session, send protocol.Send) {
 	record := sessionLogRecord(session, LogDebug, LogSendReceived)
 	record.MessageType, record.MessageID, record.Action = protocol.SendType, send.ID, send.Action
+	defer func() {
+		if recover() != nil {
+			record.Level, record.Event, record.Reason = LogError, LogSendDropped, "handler_panic"
+			s.log(ctx, record)
+		}
+	}()
 	s.log(ctx, record)
 	handler, ok := s.config.Router.lookup(session.version, send.Action)
 	if !ok {
@@ -532,12 +550,21 @@ func (s *Server) handleSend(ctx context.Context, session *Session, send protocol
 func (s *Server) handleCall(ctx context.Context, session *Session, call protocol.Call) {
 	record := sessionLogRecord(session, LogDebug, LogCallReceived)
 	record.MessageType, record.MessageID, record.Action = protocol.CallType, call.ID, call.Action
+	defer func() {
+		if recover() != nil {
+			record.Level, record.Event, record.ErrorCode, record.Reason = LogError, LogCallRejected, InternalError, "handler_panic"
+			s.log(ctx, record)
+			_ = session.send(ctx, protocol.CallError{
+				ID: call.ID, Code: string(InternalError), Description: "internal error", Details: json.RawMessage(`{}`),
+			})
+		}
+	}()
 	s.log(ctx, record)
 	handler, ok := s.config.Router.lookup(session.version, call.Action)
 	if !ok {
 		record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, NotImplemented, "action_not_registered"
 		s.log(ctx, record)
-		_ = session.Send(ctx, protocol.CallError{ID: call.ID, Code: string(NotImplemented), Description: "action is not registered"})
+		_ = session.send(ctx, protocol.CallError{ID: call.ID, Code: string(NotImplemented), Description: "action is not registered"})
 		return
 	}
 	response, err := handler(ctx, session, call.Payload)
@@ -569,7 +596,7 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 	}
 	record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, callError.Code, "handler_error"
 	s.log(ctx, record)
-	_ = session.Send(ctx, protocol.CallError{ID: call.ID, Code: string(callError.Code), Description: callError.Description, Details: raw})
+	_ = session.send(ctx, protocol.CallError{ID: call.ID, Code: string(callError.Code), Description: callError.Description, Details: raw})
 }
 
 func validErrorCode(version protocol.Version, code ErrorCode) bool {

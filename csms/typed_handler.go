@@ -24,14 +24,14 @@ type TypedSendHandler[Request protocol.Payload] func(context.Context, *Session, 
 // error returned by the handler is not written back to the Charging Station.
 func HandleSend[Request protocol.Payload](router *Router, handler TypedSendHandler[Request]) error {
 	if router == nil {
-		return fmt.Errorf("router is nil")
+		return fmt.Errorf("%w: router is nil", ErrInvalidHandlerRegistration)
 	}
 	if handler == nil {
-		return fmt.Errorf("handler is nil")
+		return fmt.Errorf("%w: handler is nil", ErrInvalidHandlerRegistration)
 	}
 	var request Request
 	if isNilType(request) || request.Direction() != protocol.RequestPayload {
-		return fmt.Errorf("SEND handler requires a non-pointer generated request payload")
+		return fmt.Errorf("%w: SEND handler requires a non-pointer generated request payload", ErrInvalidHandlerRegistration)
 	}
 	version, action := request.Version(), request.ActionName()
 	return router.Handle(version, action, func(ctx context.Context, session *Session, raw json.RawMessage) (any, error) {
@@ -53,24 +53,24 @@ func Handle[Request protocol.Payload, Confirmation protocol.Payload](
 	handler TypedHandler[Request, Confirmation],
 ) error {
 	if router == nil {
-		return fmt.Errorf("router is nil")
+		return fmt.Errorf("%w: router is nil", ErrInvalidHandlerRegistration)
 	}
 	if handler == nil {
-		return fmt.Errorf("handler is nil")
+		return fmt.Errorf("%w: handler is nil", ErrInvalidHandlerRegistration)
 	}
 	var request Request
 	var confirmation Confirmation
 	if isNilType(request) || isNilType(confirmation) {
-		return fmt.Errorf("request and confirmation type parameters must be non-pointer generated payloads")
+		return fmt.Errorf("%w: request and confirmation type parameters must be non-pointer generated payloads", ErrInvalidHandlerRegistration)
 	}
 	if request.Direction() != protocol.RequestPayload || confirmation.Direction() != protocol.ConfirmationPayload {
-		return fmt.Errorf("typed handler requires a request followed by a confirmation")
+		return fmt.Errorf("%w: typed handler requires a request followed by a confirmation", ErrInvalidHandlerRegistration)
 	}
 	if request.Version() != confirmation.Version() {
-		return fmt.Errorf("request version %s does not match confirmation version %s", request.Version(), confirmation.Version())
+		return fmt.Errorf("%w: request version %s does not match confirmation version %s", ErrInvalidHandlerRegistration, request.Version(), confirmation.Version())
 	}
 	if request.ActionName() != confirmation.ActionName() {
-		return fmt.Errorf("request action %s does not match confirmation action %s", request.ActionName(), confirmation.ActionName())
+		return fmt.Errorf("%w: request action %s does not match confirmation action %s", ErrInvalidHandlerRegistration, request.ActionName(), confirmation.ActionName())
 	}
 
 	version := request.Version()

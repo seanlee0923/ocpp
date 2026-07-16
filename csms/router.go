@@ -11,7 +11,10 @@ import (
 	"github.com/seanlee0923/ocpp/protocol"
 )
 
-var ErrHandlerAlreadyRegistered = errors.New("OCPP handler is already registered")
+var (
+	ErrInvalidHandlerRegistration = errors.New("invalid OCPP handler registration")
+	ErrHandlerAlreadyRegistered   = errors.New("OCPP handler is already registered")
+)
 
 type Handler func(context.Context, *Session, json.RawMessage) (any, error)
 
@@ -26,7 +29,7 @@ type Router struct {
 // Use appends middleware that is applied to every registered handler at
 // lookup time. Middleware is executed in registration order.
 func (r *Router) Use(middleware Middleware) {
-	if middleware == nil {
+	if r == nil || middleware == nil {
 		return
 	}
 	r.mu.Lock()
@@ -43,18 +46,21 @@ func NewRouter() *Router {
 // existing handler.
 func (r *Router) Handle(version protocol.Version, action string, handler Handler) error {
 	if r == nil {
-		return fmt.Errorf("router is nil")
+		return fmt.Errorf("%w: router is nil", ErrInvalidHandlerRegistration)
 	}
 	if !version.Valid() {
-		return fmt.Errorf("unsupported OCPP version %q", version)
+		return fmt.Errorf("%w: unsupported OCPP version %q", ErrInvalidHandlerRegistration, version)
 	}
 	if utf8.RuneCountInString(action) == 0 || utf8.RuneCountInString(action) > protocol.MaxActionLength {
-		return fmt.Errorf("action must contain 1 to %d characters", protocol.MaxActionLength)
+		return fmt.Errorf("%w: action must contain 1 to %d characters", ErrInvalidHandlerRegistration, protocol.MaxActionLength)
 	}
 	if handler == nil {
-		return fmt.Errorf("handler is nil")
+		return fmt.Errorf("%w: handler is nil", ErrInvalidHandlerRegistration)
 	}
 	r.mu.Lock()
+	if r.handlers == nil {
+		r.handlers = make(map[protocol.Version]map[string]Handler)
+	}
 	defer r.mu.Unlock()
 	if r.handlers[version] == nil {
 		r.handlers[version] = make(map[string]Handler)
@@ -67,14 +73,22 @@ func (r *Router) Handle(version protocol.Version, action string, handler Handler
 }
 
 func (r *Router) lookup(version protocol.Version, action string) (Handler, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	handler, ok := r.handlers[version][action]
-	if !ok {
+	if r == nil {
 		return nil, false
 	}
-	for index := len(r.middleware) - 1; index >= 0; index-- {
-		handler = r.middleware[index](version, action, handler)
+	r.mu.RLock()
+	handler, ok := r.handlers[version][action]
+	if !ok {
+		r.mu.RUnlock()
+		return nil, false
+	}
+	middleware := append([]Middleware(nil), r.middleware...)
+	r.mu.RUnlock()
+	for index := len(middleware) - 1; index >= 0; index-- {
+		handler = middleware[index](version, action, handler)
+		if handler == nil {
+			return nil, false
+		}
 	}
 	return handler, true
 }

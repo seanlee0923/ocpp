@@ -117,6 +117,38 @@ func TestCallHonorsContextTimeout(t *testing.T) {
 	}
 }
 
+func TestCallConvertsUniqueIDGeneratorPanicToError(t *testing.T) {
+	connected := make(chan *Session, 1)
+	server, err := New(Config{
+		Versions: []protocol.Version{protocol.OCPP16},
+		UniqueIDGenerator: func() string {
+			panic("generator failed")
+		},
+		OnConnect: func(session *Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
+	defer conn.Close()
+	_, err = Call[v16.ResetRequest, v16.ResetConfirmation](
+		context.Background(), <-connected, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+	)
+	if !errors.Is(err, ErrUniqueIDGeneration) {
+		t.Fatalf("error = %v, want ErrUniqueIDGeneration", err)
+	}
+}
+
+func TestGenerateUniqueIDRejectsInvalidLength(t *testing.T) {
+	for _, id := range []string{"", strings.Repeat("x", protocol.MaxUniqueIDLength+1)} {
+		if _, err := generateUniqueID(func() string { return id }); !errors.Is(err, ErrUniqueIDGeneration) {
+			t.Fatalf("ID length %d error = %v", len(id), err)
+		}
+	}
+}
+
 func dialTestStation(t *testing.T, serverURL string, version protocol.Version) *websocket.Conn {
 	t.Helper()
 	dialer := websocket.Dialer{Subprotocols: []string{string(version)}}
