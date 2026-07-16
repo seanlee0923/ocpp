@@ -33,7 +33,6 @@ type MeterValuesHandler func(context.Context, *csms.Session, v21.MeterValuesRequ
 type NotifyReportHandler func(context.Context, *csms.Session, v21.NotifyReportRequest) (v21.NotifyReportConfirmation, error)
 type NotifyEVChargingNeedsHandler func(context.Context, *csms.Session, v21.NotifyEVChargingNeedsRequest) (v21.NotifyEVChargingNeedsConfirmation, error)
 type NotifyEVChargingScheduleHandler func(context.Context, *csms.Session, v21.NotifyEVChargingScheduleRequest) (v21.NotifyEVChargingScheduleConfirmation, error)
-type NotifyAllowedEnergyTransferHandler func(context.Context, *csms.Session, v21.NotifyAllowedEnergyTransferRequest) (v21.NotifyAllowedEnergyTransferConfirmation, error)
 type NotifyChargingLimitHandler func(context.Context, *csms.Session, v21.NotifyChargingLimitRequest) (v21.NotifyChargingLimitConfirmation, error)
 type ClearedChargingLimitHandler func(context.Context, *csms.Session, v21.ClearedChargingLimitRequest) (v21.ClearedChargingLimitConfirmation, error)
 type ReportChargingProfilesHandler func(context.Context, *csms.Session, v21.ReportChargingProfilesRequest) (v21.ReportChargingProfilesConfirmation, error)
@@ -42,9 +41,7 @@ type PullDynamicScheduleUpdateHandler func(context.Context, *csms.Session, v21.P
 type ReportDERControlHandler func(context.Context, *csms.Session, v21.ReportDERControlRequest) (v21.ReportDERControlConfirmation, error)
 type NotifyDERAlarmHandler func(context.Context, *csms.Session, v21.NotifyDERAlarmRequest) (v21.NotifyDERAlarmConfirmation, error)
 type NotifyDERStartStopHandler func(context.Context, *csms.Session, v21.NotifyDERStartStopRequest) (v21.NotifyDERStartStopConfirmation, error)
-type GetTariffsHandler func(context.Context, *csms.Session, v21.GetTariffsRequest) (v21.GetTariffsConfirmation, error)
 type NotifySettlementHandler func(context.Context, *csms.Session, v21.NotifySettlementRequest) (v21.NotifySettlementConfirmation, error)
-type NotifyWebPaymentStartedHandler func(context.Context, *csms.Session, v21.NotifyWebPaymentStartedRequest) (v21.NotifyWebPaymentStartedConfirmation, error)
 type VatNumberValidationHandler func(context.Context, *csms.Session, v21.VatNumberValidationRequest) (v21.VatNumberValidationConfirmation, error)
 type BatterySwapHandler func(context.Context, *csms.Session, v21.BatterySwapRequest) (v21.BatterySwapConfirmation, error)
 type NotifyPeriodicEventStreamHandler func(context.Context, *csms.Session, v21.NotifyPeriodicEventStreamRequest) error
@@ -53,6 +50,7 @@ type ClosePeriodicEventStreamHandler func(context.Context, *csms.Session, v21.Cl
 type SignCertificateHandler func(context.Context, *csms.Session, v21.SignCertificateRequest) (v21.SignCertificateConfirmation, error)
 type Get15118EVCertificateHandler func(context.Context, *csms.Session, v21.Get15118EVCertificateRequest) (v21.Get15118EVCertificateConfirmation, error)
 type GetCertificateStatusHandler func(context.Context, *csms.Session, v21.GetCertificateStatusRequest) (v21.GetCertificateStatusConfirmation, error)
+type GetCertificateChainStatusHandler func(context.Context, *csms.Session, v21.GetCertificateChainStatusRequest) (v21.GetCertificateChainStatusConfirmation, error)
 type FirmwareStatusNotificationHandler func(context.Context, *csms.Session, v21.FirmwareStatusNotificationRequest) (v21.FirmwareStatusNotificationConfirmation, error)
 type PublishFirmwareStatusNotificationHandler func(context.Context, *csms.Session, v21.PublishFirmwareStatusNotificationRequest) (v21.PublishFirmwareStatusNotificationConfirmation, error)
 
@@ -121,9 +119,6 @@ func (profile *Profile) HandleNotifyEVChargingNeeds(handler NotifyEVChargingNeed
 func (profile *Profile) HandleNotifyEVChargingSchedule(handler NotifyEVChargingScheduleHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyEVChargingScheduleRequest, v21.NotifyEVChargingScheduleConfirmation](handler))
 }
-func (profile *Profile) HandleNotifyAllowedEnergyTransfer(handler NotifyAllowedEnergyTransferHandler) error {
-	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyAllowedEnergyTransferRequest, v21.NotifyAllowedEnergyTransferConfirmation](handler))
-}
 func (profile *Profile) HandleNotifyChargingLimit(handler NotifyChargingLimitHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyChargingLimitRequest, v21.NotifyChargingLimitConfirmation](handler))
 }
@@ -148,14 +143,8 @@ func (profile *Profile) HandleNotifyDERAlarm(handler NotifyDERAlarmHandler) erro
 func (profile *Profile) HandleNotifyDERStartStop(handler NotifyDERStartStopHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyDERStartStopRequest, v21.NotifyDERStartStopConfirmation](handler))
 }
-func (profile *Profile) HandleGetTariffs(handler GetTariffsHandler) error {
-	return csms.Handle(profile.router, csms.TypedHandler[v21.GetTariffsRequest, v21.GetTariffsConfirmation](handler))
-}
 func (profile *Profile) HandleNotifySettlement(handler NotifySettlementHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifySettlementRequest, v21.NotifySettlementConfirmation](handler))
-}
-func (profile *Profile) HandleNotifyWebPaymentStarted(handler NotifyWebPaymentStartedHandler) error {
-	return csms.Handle(profile.router, csms.TypedHandler[v21.NotifyWebPaymentStartedRequest, v21.NotifyWebPaymentStartedConfirmation](handler))
 }
 func (profile *Profile) HandleVatNumberValidation(handler VatNumberValidationHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.VatNumberValidationRequest, v21.VatNumberValidationConfirmation](handler))
@@ -180,6 +169,9 @@ func (profile *Profile) HandleGet15118EVCertificate(handler Get15118EVCertificat
 }
 func (profile *Profile) HandleGetCertificateStatus(handler GetCertificateStatusHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.GetCertificateStatusRequest, v21.GetCertificateStatusConfirmation](handler))
+}
+func (profile *Profile) HandleGetCertificateChainStatus(handler GetCertificateChainStatusHandler) error {
+	return csms.Handle(profile.router, csms.TypedHandler[v21.GetCertificateChainStatusRequest, v21.GetCertificateChainStatusConfirmation](handler))
 }
 func (profile *Profile) HandleFirmwareStatusNotification(handler FirmwareStatusNotificationHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.FirmwareStatusNotificationRequest, v21.FirmwareStatusNotificationConfirmation](handler))
@@ -242,6 +234,12 @@ func (profile *Profile) CallClearChargingProfile(ctx context.Context, session *c
 	}
 	return csms.Call[v21.ClearChargingProfileRequest, v21.ClearChargingProfileConfirmation](ctx, session, request)
 }
+func (profile *Profile) CallNotifyAllowedEnergyTransfer(ctx context.Context, session *csms.Session, request v21.NotifyAllowedEnergyTransferRequest) (v21.NotifyAllowedEnergyTransferConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.NotifyAllowedEnergyTransferConfirmation{}, err
+	}
+	return csms.Call[v21.NotifyAllowedEnergyTransferRequest, v21.NotifyAllowedEnergyTransferConfirmation](ctx, session, request)
+}
 func (profile *Profile) CallUsePriorityCharging(ctx context.Context, session *csms.Session, request v21.UsePriorityChargingRequest) (v21.UsePriorityChargingConfirmation, error) {
 	if err := profile.requireBooted(session); err != nil {
 		return v21.UsePriorityChargingConfirmation{}, err
@@ -302,6 +300,18 @@ func (profile *Profile) CallCostUpdated(ctx context.Context, session *csms.Sessi
 	}
 	return csms.Call[v21.CostUpdatedRequest, v21.CostUpdatedConfirmation](ctx, session, request)
 }
+func (profile *Profile) CallGetTariffs(ctx context.Context, session *csms.Session, request v21.GetTariffsRequest) (v21.GetTariffsConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.GetTariffsConfirmation{}, err
+	}
+	return csms.Call[v21.GetTariffsRequest, v21.GetTariffsConfirmation](ctx, session, request)
+}
+func (profile *Profile) CallNotifyWebPaymentStarted(ctx context.Context, session *csms.Session, request v21.NotifyWebPaymentStartedRequest) (v21.NotifyWebPaymentStartedConfirmation, error) {
+	if err := profile.requireBooted(session); err != nil {
+		return v21.NotifyWebPaymentStartedConfirmation{}, err
+	}
+	return csms.Call[v21.NotifyWebPaymentStartedRequest, v21.NotifyWebPaymentStartedConfirmation](ctx, session, request)
+}
 func (profile *Profile) CallRequestBatterySwap(ctx context.Context, session *csms.Session, request v21.RequestBatterySwapRequest) (v21.RequestBatterySwapConfirmation, error) {
 	if err := profile.requireBooted(session); err != nil {
 		return v21.RequestBatterySwapConfirmation{}, err
@@ -343,12 +353,6 @@ func (profile *Profile) CallGetInstalledCertificateIds(ctx context.Context, sess
 		return v21.GetInstalledCertificateIdsConfirmation{}, err
 	}
 	return csms.Call[v21.GetInstalledCertificateIdsRequest, v21.GetInstalledCertificateIdsConfirmation](ctx, session, request)
-}
-func (profile *Profile) CallGetCertificateChainStatus(ctx context.Context, session *csms.Session, request v21.GetCertificateChainStatusRequest) (v21.GetCertificateChainStatusConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.GetCertificateChainStatusConfirmation{}, err
-	}
-	return csms.Call[v21.GetCertificateChainStatusRequest, v21.GetCertificateChainStatusConfirmation](ctx, session, request)
 }
 func (profile *Profile) CallUpdateFirmware(ctx context.Context, session *csms.Session, request v21.UpdateFirmwareRequest) (v21.UpdateFirmwareConfirmation, error) {
 	if err := profile.requireBooted(session); err != nil {
