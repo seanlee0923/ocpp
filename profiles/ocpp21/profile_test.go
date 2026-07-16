@@ -435,6 +435,70 @@ func TestTransactionAndDeviceModelRoundTrips(t *testing.T) {
 	}
 }
 
+func TestNotifyPeriodicEventStreamUsesUnconfirmedSend(t *testing.T) {
+	router := csms.NewRouter()
+	profile, err := NewProfile(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.HandleBootNotification(func(context.Context, *csms.Session, v21.BootNotificationRequest) (v21.BootNotificationConfirmation, error) {
+		return v21.BootNotificationConfirmation{CurrentTime: "2026-07-16T00:00:00Z", Interval: 300, Status: v21.BootNotificationConfirmationRegistrationStatusEnumAccepted}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan v21.NotifyPeriodicEventStreamRequest, 1)
+	if err := profile.HandleNotifyPeriodicEventStream(func(_ context.Context, _ *csms.Session, request v21.NotifyPeriodicEventStreamRequest) error {
+		received <- request
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP21}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	dialer := websocket.Dialer{Subprotocols: []string{string(protocol.OCPP21)}}
+	conn, _, err := dialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/CP-STREAM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	sendCall(t, conn, "boot", v21.BootNotificationRequest{
+		Reason:          v21.BootNotificationRequestBootReasonEnumPowerUp,
+		ChargingStation: v21.BootNotificationRequestChargingStation{Model: "AC-22K", VendorName: "Example"},
+	})
+	_ = readMessage(t, conn)
+	payload := v21.NotifyPeriodicEventStreamRequest{
+		ID: 41, Pending: 0, Basetime: "2026-07-16T00:00:01Z",
+		Data: []v21.NotifyPeriodicEventStreamRequestStreamDataElement{{T: 0, V: "230.4"}},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := protocol.Encode(protocol.Send{ID: "send-1", Action: payload.ActionName(), Payload: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-received:
+		if got.ID != 41 || len(got.Data) != 1 || got.Data[0].V != "230.4" {
+			t.Fatalf("stream = %#v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SEND handler was not called")
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("CSMS acknowledged an unconfirmed SEND")
+	}
+}
+
 func TestNewProfileRejectsNilRouterAndHandler(t *testing.T) {
 	if _, err := NewProfile(nil); err == nil {
 		t.Fatal("NewProfile(nil) succeeded")

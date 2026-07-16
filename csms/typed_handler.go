@@ -17,6 +17,35 @@ type TypedHandler[Request protocol.Payload, Confirmation protocol.Payload] func(
 	Request,
 ) (Confirmation, error)
 
+type TypedSendHandler[Request protocol.Payload] func(context.Context, *Session, Request) error
+
+// HandleSend registers an OCPP 2.1 SEND handler. SEND is unconfirmed, so an
+// error returned by the handler is not written back to the Charging Station.
+func HandleSend[Request protocol.Payload](router *Router, handler TypedSendHandler[Request]) error {
+	if router == nil {
+		return fmt.Errorf("router is nil")
+	}
+	if handler == nil {
+		return fmt.Errorf("handler is nil")
+	}
+	var request Request
+	if isNilType(request) || request.Direction() != protocol.RequestPayload {
+		return fmt.Errorf("SEND handler requires a non-pointer generated request payload")
+	}
+	version, action := request.Version(), request.ActionName()
+	router.Handle(version, action, func(ctx context.Context, session *Session, raw json.RawMessage) (any, error) {
+		if err := request.ValidateJSON(raw); err != nil {
+			return nil, err
+		}
+		var decoded Request
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return nil, err
+		}
+		return nil, handler(ctx, session, decoded)
+	})
+	return nil
+}
+
 // Handle registers a type-safe OCPP handler. Request and Confirmation must be
 // generated non-pointer payload types for the same action and version.
 func Handle[Request protocol.Payload, Confirmation protocol.Payload](

@@ -47,6 +47,7 @@ type NotifySettlementHandler func(context.Context, *csms.Session, v21.NotifySett
 type NotifyWebPaymentStartedHandler func(context.Context, *csms.Session, v21.NotifyWebPaymentStartedRequest) (v21.NotifyWebPaymentStartedConfirmation, error)
 type VatNumberValidationHandler func(context.Context, *csms.Session, v21.VatNumberValidationRequest) (v21.VatNumberValidationConfirmation, error)
 type BatterySwapHandler func(context.Context, *csms.Session, v21.BatterySwapRequest) (v21.BatterySwapConfirmation, error)
+type NotifyPeriodicEventStreamHandler func(context.Context, *csms.Session, v21.NotifyPeriodicEventStreamRequest) error
 
 type sessionState struct{ registration atomic.Uint32 }
 
@@ -154,6 +155,9 @@ func (profile *Profile) HandleVatNumberValidation(handler VatNumberValidationHan
 }
 func (profile *Profile) HandleBatterySwap(handler BatterySwapHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v21.BatterySwapRequest, v21.BatterySwapConfirmation](handler))
+}
+func (profile *Profile) HandleNotifyPeriodicEventStream(handler NotifyPeriodicEventStreamHandler) error {
+	return csms.HandleSend(profile.router, csms.TypedSendHandler[v21.NotifyPeriodicEventStreamRequest](handler))
 }
 
 func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {

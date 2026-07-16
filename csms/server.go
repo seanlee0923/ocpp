@@ -465,6 +465,15 @@ func (s *Server) readLoop(session *Session) error {
 			}) {
 				return context.Cause(session.ctx)
 			}
+		case protocol.Send:
+			if session.version != protocol.OCPP21 {
+				return fmt.Errorf("SEND is only supported by OCPP 2.1")
+			}
+			if !session.startHandler(func(ctx context.Context) {
+				s.handleSend(ctx, session, value)
+			}) {
+				return context.Cause(session.ctx)
+			}
 		case protocol.CallResult, protocol.CallError:
 			// Unknown IDs are late or unsolicited responses and are ignored.
 			session.resolve(message)
@@ -472,6 +481,16 @@ func (s *Server) readLoop(session *Session) error {
 			return fmt.Errorf("unexpected inbound message type %d", message.Type())
 		}
 	}
+}
+
+func (s *Server) handleSend(ctx context.Context, session *Session, send protocol.Send) {
+	handler, ok := s.config.Router.lookup(session.version, send.Action)
+	if !ok {
+		return
+	}
+	// OCPP 2.1 SEND is unconfirmed. Handler and validation failures are
+	// intentionally not converted to CALLRESULT or CALLERROR.
+	_, _ = handler(ctx, session, send.Payload)
 }
 
 func (s *Server) handleCall(ctx context.Context, session *Session, call protocol.Call) {

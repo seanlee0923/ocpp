@@ -17,6 +17,22 @@ func TestDecodeCall(t *testing.T) {
 	}
 }
 
+func TestSendRoundTrip(t *testing.T) {
+	want := Send{ID: "stream-1", Action: "NotifyPeriodicEventStream", Payload: json.RawMessage(`{"id":1}`)}
+	data, err := Encode(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := message.(Send)
+	if !ok || got.ID != want.ID || got.Action != want.Action || string(got.Payload) != string(want.Payload) {
+		t.Fatalf("SEND = %#v", message)
+	}
+}
+
 func TestDecodeRejectsInvalidMessages(t *testing.T) {
 	tests := []string{
 		`{}`,

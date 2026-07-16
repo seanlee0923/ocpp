@@ -21,6 +21,7 @@ const (
 	CallType       MessageTypeID = 2
 	CallResultType MessageTypeID = 3
 	CallErrorType  MessageTypeID = 4
+	SendType       MessageTypeID = 6
 )
 
 var ErrInvalidMessage = errors.New("invalid OCPP message")
@@ -62,8 +63,19 @@ type Call struct {
 	Payload json.RawMessage
 }
 
+// Send is an OCPP 2.1 unconfirmed message. The receiver must not return a
+// CALLRESULT or CALLERROR.
+type Send struct {
+	ID      string
+	Action  string
+	Payload json.RawMessage
+}
+
 func (m Call) Type() MessageTypeID { return CallType }
 func (m Call) UniqueID() string    { return m.ID }
+
+func (m Send) Type() MessageTypeID { return SendType }
+func (m Send) UniqueID() string    { return m.ID }
 
 type CallResult struct {
 	ID      string
@@ -123,6 +135,21 @@ func Decode(data []byte) (Message, error) {
 			return nil, fmt.Errorf("%w: CALL payload must be an object", ErrInvalidMessage)
 		}
 		return Call{ID: id, Action: action, Payload: fields[3]}, nil
+	case SendType:
+		if len(fields) != 4 {
+			return nil, fmt.Errorf("%w: SEND requires 4 fields", ErrInvalidMessage)
+		}
+		var id, action string
+		if err := json.Unmarshal(fields[1], &id); err != nil || !validLength(id, MaxUniqueIDLength) {
+			return nil, fmt.Errorf("%w: invalid SEND unique ID", ErrInvalidMessage)
+		}
+		if err := json.Unmarshal(fields[2], &action); err != nil || !validLength(action, MaxActionLength) {
+			return nil, fmt.Errorf("%w: invalid SEND action", ErrInvalidMessage)
+		}
+		if !isObject(fields[3]) {
+			return nil, fmt.Errorf("%w: SEND payload must be an object", ErrInvalidMessage)
+		}
+		return Send{ID: id, Action: action, Payload: fields[3]}, nil
 	case CallResultType:
 		if len(fields) != 3 {
 			return nil, fmt.Errorf("%w: CALLRESULT requires 3 fields", ErrInvalidMessage)
@@ -153,6 +180,11 @@ func Encode(message Message) ([]byte, error) {
 			return nil, fmt.Errorf("%w: invalid CALL", ErrInvalidMessage)
 		}
 		return json.Marshal([]any{CallType, m.ID, m.Action, normalizedObject(m.Payload)})
+	case Send:
+		if !validLength(m.ID, MaxUniqueIDLength) || !validLength(m.Action, MaxActionLength) || !isObject(normalizedObject(m.Payload)) {
+			return nil, fmt.Errorf("%w: invalid SEND", ErrInvalidMessage)
+		}
+		return json.Marshal([]any{SendType, m.ID, m.Action, normalizedObject(m.Payload)})
 	case CallResult:
 		if !validLength(m.ID, MaxUniqueIDLength) || !isObject(normalizedObject(m.Payload)) {
 			return nil, fmt.Errorf("%w: invalid CALLRESULT", ErrInvalidMessage)
