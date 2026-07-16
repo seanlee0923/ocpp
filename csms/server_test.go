@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"ocpp-go/protocol"
 	"ocpp-go/v16"
+	"ocpp-go/v201"
 )
 
 func TestServerNegotiatesAndRoutes(t *testing.T) {
@@ -179,6 +180,45 @@ func TestServerWritesClassifiedConstraintCallErrors(t *testing.T) {
 		if callError.ID != test.id || callError.Code != string(test.code) {
 			t.Fatalf("CALLERROR = %#v, want id=%q code=%q", callError, test.id, test.code)
 		}
+	}
+}
+
+func TestServerRejectsInvalidAuthorizeEnumBeforeHandler(t *testing.T) {
+	router := NewRouter()
+	called := false
+	if err := Handle(router, func(context.Context, *Session, v201.AuthorizeRequest) (v201.AuthorizeConfirmation, error) {
+		called = true
+		return v201.AuthorizeConfirmation{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Config{Router: router, Versions: []protocol.Version{protocol.OCPP201}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP201)
+	defer conn.Close()
+
+	message := `[2,"authorize-invalid","Authorize",{"idToken":{"idToken":"TAG-201","type":"Hello"}}]`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
+		t.Fatal(err)
+	}
+	_, response, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := protocol.Decode(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callError, ok := decoded.(protocol.CallError)
+	if !ok || callError.ID != "authorize-invalid" || callError.Code != string(PropertyConstraintViolation) {
+		t.Fatalf("response = %#v, want PropertyConstraintViolation CALLERROR", decoded)
+	}
+	if called {
+		t.Fatal("Authorize handler ran for invalid idToken.type enum")
 	}
 }
 
