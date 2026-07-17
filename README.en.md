@@ -496,8 +496,11 @@ statistics before and after the run.
 
 ```sh
 OCPP_SOAK_DURATION=30m GOCACHE=/tmp/ocpp-go-build-cache go test -race \
-  -run '^TestSessionSoak$' ./csms
+  -timeout 35m -run '^TestSessionSoak$' ./csms
 ```
+
+`go test`'s default `-timeout` is 10 minutes, so you must pass a `-timeout`
+longer than `OCPP_SOAK_DURATION`.
 
 Benchmarks cover frame encode/decode, schema validation, Router dispatch, and
 a full WebSocket loopback round trip.
