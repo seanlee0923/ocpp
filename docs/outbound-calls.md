@@ -1,5 +1,7 @@
 # Outbound CALL
 
+**한국어** | [English](en/outbound-calls.md)
+
 CSMS가 Charging Station으로 시작하는 요청은 profile method 또는 `csms.Call`을 사용한다.
 
 ```go

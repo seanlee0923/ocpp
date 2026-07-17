@@ -1,5 +1,7 @@
 # OCPP 2.0.1
 
+**한국어** | [English](en/ocpp201.md)
+
 WebSocket subprotocol은 `ocpp2.0.1`이며 생성 타입은 Edition 4 Schema를 기준으로 한다.
 `profiles/ocpp201`은 BootNotification registration gate와 Heartbeat, StatusNotification,
 Authorize, TransactionEvent, MeterValues, NotifyReport handler를 제공한다.

@@ -1,5 +1,7 @@
 # ocpp-go
 
+**한국어** | [English](README.en.md)
+
 Go로 작성된 OCPP-J CSMS WebSocket 서버 라이브러리입니다. 하나의 전송 계층에서
 OCPP 1.6, 2.0.1, 2.1을 처리하며 공식 JSON Schema 기반 메시지 타입과 타입 안전
 라우팅을 제공합니다.

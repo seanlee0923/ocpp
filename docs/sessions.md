@@ -1,5 +1,7 @@
 # 세션과 연결 생명주기
 
+**한국어** | [English](en/sessions.md)
+
 `Server`는 identity마다 하나의 활성 `Session`을 관리한다. identity는 기본적으로 RFC 3986
 unreserved 문자와 최대 255 UTF-8 byte로 제한된다.
 

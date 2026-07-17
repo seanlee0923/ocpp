@@ -1,5 +1,7 @@
 # 인증과 TLS
 
+**한국어** | [English](en/security.md)
+
 `csms.SecurityConfig`는 WebSocket handshake 정책을 구성한다.
 
 | 값 | 정책 |

@@ -1,5 +1,7 @@
 # 시작하기
 
+**한국어** | [English](en/getting-started.md)
+
 이 라이브러리는 OCPP-J WebSocket CSMS 서버를 제공한다. OCPP 1.6 SOAP 전송은 지원하지
 않는다. 애플리케이션은 handler 안에서 DB, cache, queue와 업무 규칙을 구현한다.
 
@@ -9,7 +11,7 @@
 go get github.com/seanlee0923/ocpp
 ```
 
-프로젝트는 Go 1.26.4 이상을 대상으로 한다.
+프로젝트는 Go 1.26.5 이상을 대상으로 한다.
 
 ## 최소 서버
 

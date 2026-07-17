@@ -1,5 +1,7 @@
 # OCPP 1.6
 
+**한국어** | [English](en/ocpp16.md)
+
 WebSocket subprotocol은 `ocpp1.6`이다. 이 프로젝트는 JSON over WebSocket인 OCPP-J만 지원하며
 SOAP binding은 지원하지 않는다.
 

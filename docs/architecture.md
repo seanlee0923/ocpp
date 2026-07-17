@@ -1,5 +1,7 @@
 # 구조와 책임 범위
 
+**한국어** | [English](en/architecture.md)
+
 ```text
 Charging Station
       │ OCPP-J WebSocket

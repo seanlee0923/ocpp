@@ -1,5 +1,7 @@
 # 검증과 오류 처리
 
+**한국어** | [English](en/validation-and-errors.md)
+
 생성 payload는 `Validate`와 `ValidateJSON`을 제공한다. 네트워크 입력은 struct decode 전에 raw
 JSON으로 검증되어 unknown property, required, enum, 타입, 길이, 범위와 format 위반을 막는다.
 직접 `json.Unmarshal`한 값은 자동 검증되지 않으므로 애플리케이션에서 생성 타입을 별도로
