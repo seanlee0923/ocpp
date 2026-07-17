@@ -365,3 +365,41 @@ func TestFailedReplacementUpgradeKeepsExistingSession(t *testing.T) {
 		t.Fatal("failed replacement removed the existing session")
 	}
 }
+
+func TestFailedUpgradeReleasesReservation(t *testing.T) {
+	server, err := New(Config{Versions: []protocol.Version{protocol.OCPP16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	// This request passes the WebSocket-upgrade gate, version negotiation,
+	// and identity reservation, but omits Sec-WebSocket-Key so gorilla's
+	// Upgrade() itself fails after the identity is already reserved.
+	// dialTestStation (used below) always dials identity "CP-001", so this
+	// pre-flight request reserves the same identity to exercise the release.
+	request, err := http.NewRequest(http.MethodGet, httpServer.URL+"/CP-001", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	request.Header.Set("Sec-WebSocket-Protocol", string(protocol.OCPP16))
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode == http.StatusSwitchingProtocols {
+		t.Fatal("malformed handshake unexpectedly succeeded")
+	}
+
+	// If the reservation from the failed attempt above was not released,
+	// this legitimate dial for the same identity is rejected with 409
+	// "charging station connection is already pending".
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
+	defer conn.Close()
+	waitForSession(t, server, "CP-001")
+}
