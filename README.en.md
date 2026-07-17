@@ -499,6 +499,13 @@ OCPP_SOAK_DURATION=30m GOCACHE=/tmp/ocpp-go-build-cache go test -race \
   -run '^TestSessionSoak$' ./csms
 ```
 
+Benchmarks cover frame encode/decode, schema validation, Router dispatch, and
+a full WebSocket loopback round trip.
+
+```sh
+GOCACHE=/tmp/ocpp-go-build-cache go test -run '^$' -bench . -benchmem ./...
+```
+
 ## Structured logging
 
 A `csms.Logger` can be injected without depending on any specific logging

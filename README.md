@@ -468,6 +468,13 @@ OCPP_SOAK_DURATION=30m GOCACHE=/tmp/ocpp-go-build-cache go test -race \
   -run '^TestSessionSoak$' ./csms
 ```
 
+frame encode/decode, schema 검증, Router dispatch와 WebSocket loopback 왕복 전체
+경로에 대한 벤치마크도 있습니다.
+
+```sh
+GOCACHE=/tmp/ocpp-go-build-cache go test -run '^$' -bench . -benchmem ./...
+```
+
 ## 구조화 로그
 
 특정 로깅 라이브러리 의존 없이 `csms.Logger`를 주입할 수 있습니다.
