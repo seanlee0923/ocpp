@@ -15,6 +15,12 @@ import (
 	"unicode/utf8"
 )
 
+// Pattern, AnyOf, OneOf, and AllOf are unused by all 365 official OCPP
+// 1.6/2.0.1/2.1 schemas as of this writing (the spec relies on type, enum,
+// required, and length/numeric bounds instead). The fields and their
+// validate() branches are kept so a future OCPP revision that does use them
+// works without changes; see schema_keywords_test.go for direct coverage
+// since no generated schema exercises this path.
 type Schema struct {
 	Type                 string
 	Properties           map[string]*Schema
