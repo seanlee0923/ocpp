@@ -506,6 +506,27 @@ a full WebSocket loopback round trip.
 GOCACHE=/tmp/ocpp-go-build-cache go test -run '^$' -bench . -benchmem ./...
 ```
 
+Reference numbers below (Apple M2, local run; actual results vary by hardware).
+
+| Benchmark | Time/op | Bytes/op | Allocs/op |
+|---|---:|---:|---:|
+| `DecodeCall` | 9.6 µs | 4.8 KB | 115 |
+| `EncodeCallResult` | 2.6 µs | 969 B | 21 |
+| `ValidateJSONSmall` (BootNotification) | 2.2 µs | 1.8 KB | 27 |
+| `ValidateJSONLarge` (100-item array) | 93.4 µs | 55.6 KB | 1026 |
+| `ValidateThenUnmarshalSmall` | 3.8 µs | 2.2 KB | 37 |
+| `ValidateThenUnmarshalLarge` | 156.9 µs | 65.9 KB | 1143 |
+| `RouterLookup`, 0 middleware | 15.5 ns | 0 B | 0 |
+| `RouterLookup`, 5 middleware | 113.6 ns | 128 B | 6 |
+| `InboundCallRoundTrip` (full WebSocket loopback round trip) | 30.4 µs | 5.7 KB | 82 |
+
+Even a full round trip over a real network stays in the tens of
+microseconds, so throughput is unlikely to be a bottleneck for OCPP, where a
+single Charging Station sends a message every few minutes at most. For
+deployments where many sessions send large-array payloads (such as
+`NotifyPeriodicEventStream`) concurrently, see the
+`ValidateJSONLarge`/`ValidateThenUnmarshalLarge` numbers.
+
 ## Structured logging
 
 A `csms.Logger` can be injected without depending on any specific logging

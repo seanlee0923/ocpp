@@ -475,6 +475,26 @@ frame encode/decode, schema 검증, Router dispatch와 WebSocket loopback 왕복
 GOCACHE=/tmp/ocpp-go-build-cache go test -run '^$' -bench . -benchmem ./...
 ```
 
+참고용 측정치입니다(Apple M2, 로컬 실행; 실제 수치는 하드웨어에 따라 달라집니다).
+
+| 벤치마크 | 시간/op | 메모리/op | 할당/op |
+|---|---:|---:|---:|
+| `DecodeCall` | 9.6 µs | 4.8 KB | 115 |
+| `EncodeCallResult` | 2.6 µs | 969 B | 21 |
+| `ValidateJSONSmall` (BootNotification) | 2.2 µs | 1.8 KB | 27 |
+| `ValidateJSONLarge` (배열 100개) | 93.4 µs | 55.6 KB | 1026 |
+| `ValidateThenUnmarshalSmall` | 3.8 µs | 2.2 KB | 37 |
+| `ValidateThenUnmarshalLarge` | 156.9 µs | 65.9 KB | 1143 |
+| `RouterLookup`, 미들웨어 0개 | 15.5 ns | 0 B | 0 |
+| `RouterLookup`, 미들웨어 5개 | 113.6 ns | 128 B | 6 |
+| `InboundCallRoundTrip` (실제 WebSocket loopback 전체 왕복) | 30.4 µs | 5.7 KB | 82 |
+
+CALL 하나를 실제 네트워크까지 왕복시켜도 30µs대이므로, OCPP처럼 충전기 한 대가
+몇 분에 한 번 메시지를 보내는 저빈도 프로토콜에서는 처리량이 병목이 될 가능성이
+낮습니다. 배열이 큰 payload(예: `NotifyPeriodicEventStream`)를 아주 많은 세션이
+동시에 보내는 배포에서는 `ValidateJSONLarge`/`ValidateThenUnmarshalLarge` 수치를
+참고하세요.
+
 ## 구조화 로그
 
 특정 로깅 라이브러리 의존 없이 `csms.Logger`를 주입할 수 있습니다.
