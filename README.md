@@ -487,7 +487,11 @@ handler 오류 문자열은 전달하지 않습니다. logger가 panic해도 프
 ## 로드맵
 
 - 문서와 버전별·운영 예제 마감
-- GitHub Actions와 release 준비
+- release 준비
 - 마지막 단계의 opt-in metrics, snapshot, tracing
 - 유료 OCA OCTT와 공식 인증은 release 이후 선택적으로 수행
 - Charging Station 클라이언트
+
+## 라이선스
+
+[MIT](LICENSE)
