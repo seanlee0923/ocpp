@@ -150,7 +150,8 @@ func TestLoggerPanicDoesNotStopServer(t *testing.T) {
 	defer httpServer.Close()
 	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
 	defer conn.Close()
-	if server.SessionCount() != 1 {
-		t.Fatalf("session count = %d", server.SessionCount())
-	}
+	// The client-side dial returns as soon as it reads the HTTP 101
+	// response; the server registers the session a few lines later. Poll
+	// instead of asserting SessionCount() immediately.
+	waitForSession(t, server, "CP-001")
 }

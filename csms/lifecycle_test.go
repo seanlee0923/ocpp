@@ -188,6 +188,13 @@ func TestConcurrentSessionLifecycle(t *testing.T) {
 		}
 		connections = append(connections, result.conn)
 	}
+	// A dial returns as soon as the client reads the HTTP 101 response; the
+	// server registers the session a few lines later. Poll instead of
+	// asserting SessionCount() immediately.
+	deadline := time.Now().Add(time.Second)
+	for server.SessionCount() != stationCount && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if server.SessionCount() != stationCount {
 		t.Fatalf("session count = %d, want %d", server.SessionCount(), stationCount)
 	}
@@ -200,7 +207,7 @@ func TestConcurrentSessionLifecycle(t *testing.T) {
 		}(conn)
 	}
 	wg.Wait()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(2 * time.Second)
 	for server.SessionCount() != 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}

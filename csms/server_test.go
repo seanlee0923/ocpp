@@ -286,9 +286,10 @@ func TestServerRejectsDuplicateSessionByDefault(t *testing.T) {
 	if response == nil || response.StatusCode != http.StatusConflict {
 		t.Fatalf("response = %#v, want HTTP 409", response)
 	}
-	if server.SessionCount() != 1 {
-		t.Fatalf("session count = %d", server.SessionCount())
-	}
+	// The second dial can be rejected before the first session finishes
+	// registering (both paths check the reservation independently), so poll
+	// instead of asserting SessionCount() immediately.
+	waitForSession(t, server, "CP-001")
 }
 
 func TestServerCanReplaceDuplicateSession(t *testing.T) {
