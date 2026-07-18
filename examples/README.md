@@ -12,6 +12,7 @@
 - `tls-basic-auth`: Security Profile 2 TLS와 Basic Auth
 - `mtls`: Security Profile 3 mutual TLS
 - `structured-logger`: `log/slog` JSON logger 연결
+- `metrics-hook`: in-process Metrics 카운터와 Snapshot/Healthy 상태 endpoint
 - `graceful-shutdown`: signal 기반 세션 및 HTTP 종료
 
 ```sh

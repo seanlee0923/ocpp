@@ -9,6 +9,33 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
 
 ## [Unreleased]
 
+### Added
+
+- opt-in `csms.Metrics`/`csms.MetricsFunc` hook — 세션 연결/해제, inbound
+  CALL/SEND, outbound `csms.Call`의 각 단계(전송, 완료, 실패, timeout, 취소,
+  `MaxPendingCalls` 초과 거부)를 identity, OCPP version, message type,
+  Action, 소요 시간, error code로 관측한다. `Logger`와 동일하게 panic이
+  프로토콜 서버에 영향을 주지 않는다. `Record`는 이벤트마다 별도 goroutine에서
+  dispatch되어 느리거나 멈춘 구현체도 handler 처리나 outbound `csms.Call`의
+  취소 응답성을 지연시키지 않는다(대신 `Record`는 동시 호출 안전성이 필요하고
+  순서를 보장하지 않으며, 동시 dispatch 상한 초과 시 이벤트가 드롭된다).
+- `Server.Snapshot()`/`ServerSnapshot`과 `Server.Healthy()` — 활성 세션 수,
+  세션별 상태, shutdown 여부를 조회하는 서버 상태 API. HTTP endpoint 형식은
+  강제하지 않는다.
+- [`examples/metrics-hook`](examples/metrics-hook) 예제 추가.
+
+### Fixed
+
+- 세션 연결 시 `LogSessionConnected`/`MetricSessionConnected` 기록 시점을 read
+  loop 시작과 `Config.OnConnect` 호출보다 앞으로 옮겼다. 이전에는 충전기가 업그레이드
+  직후 바로 CALL을 보내거나 `OnConnect`에서 blocking `csms.Call`을 사용하면(둘 다
+  지원되는 패턴) connected 이벤트보다 다른 이벤트가 먼저 관측될 수 있었다.
+- outbound `csms.Call`에서 컨텍스트가 이미 만료된 상태로 전송이 실패하는 경우
+  `MetricOutboundCallFailed`가 아니라 `MetricOutboundCallTimeout`/
+  `MetricOutboundCallCanceled`로 정확히 분류하도록 수정했다.
+- 원격 CALLERROR의 error code 추출에 raw 타입 단언 대신 `errors.As`를 사용하도록
+  변경해, 향후 에러가 wrapping되어도 안전하게 동작하도록 했다.
+
 ## [0.1.0] - 2026-07-18
 
 첫 공개 릴리스입니다. Go와 [gorilla/websocket](https://github.com/gorilla/websocket)으로

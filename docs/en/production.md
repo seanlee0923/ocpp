@@ -36,10 +36,34 @@ your deployment.
 A `csms.Logger` can be wired into an application logger. Default metadata
 never includes payloads, passwords, certificates, idTokens, or handler
 error text. A panic in the logger callback is isolated from the server.
-Metrics, snapshots, and tracing are planned as future opt-in hooks.
+
+`csms.Metrics` follows the same principle, observing session connect/
+disconnect, inbound CALL/SEND, and each stage of outbound `csms.Call`. It
+only carries identity, OCPP version, message type, Action, elapsed time, and
+an error code — never a payload. Panics are isolated the same way as
+`Logger`. Outbound `csms.Call` distinguishes the send itself
+(`MetricOutboundCallSent`) from its final outcome — completed, failed, timed
+out, canceled, or rejected because `MaxPendingCalls` was reached.
+`Metrics.Record` is dispatched on its own goroutine per event, so it never
+blocks the caller — a slow or hung implementation cannot delay handler
+processing or an outbound `csms.Call`'s cancellation responsiveness. In
+exchange, `Record` must be safe for concurrent use and carries no ordering
+guarantee; if concurrent dispatches exceed a fixed internal bound, further
+events are dropped rather than queued (a healthy implementation never
+reaches that bound).
+
+`Server.Snapshot()` and `Server.Healthy()` expose the active session count,
+per-session status, and shutdown state. The library does not impose an HTTP
+endpoint shape — define whatever path and payload your health/readiness
+probes need.
+
+An opt-in Prometheus adapter and OpenTelemetry tracing hook are not
+available yet (see the Roadmap in the root [README](../../README.en.md)).
 
 [`examples/structured-logger`](../../examples/structured-logger) shows
-wiring up the standard `log/slog`, and
+wiring up the standard `log/slog`,
+[`examples/metrics-hook`](../../examples/metrics-hook) shows an in-process
+metrics counter with a status endpoint, and
 [`examples/graceful-shutdown`](../../examples/graceful-shutdown) shows
 signal-based shutdown.
 

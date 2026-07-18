@@ -1,0 +1,132 @@
+package csms
+
+import (
+	"context"
+	"time"
+
+	"github.com/seanlee0923/ocpp/protocol"
+)
+
+type MetricEventType uint8
+
+const (
+	// MetricSessionConnected is recorded as early as possible in the
+	// connection lifecycle, before the read loop starts and before
+	// Config.OnConnect runs. It is still not guaranteed to be the first
+	// event Metrics.Record observes for a session: dispatch is async and
+	// unordered (see the Metrics doc comment), so a Metrics implementation
+	// must not assume Connected always precedes every other event for the
+	// same identity.
+	MetricSessionConnected MetricEventType = iota + 1
+	// MetricSessionDisconnected carries Duration equal to the session's
+	// total lifetime (time since connect).
+	MetricSessionDisconnected
+	MetricCallReceived
+	// MetricCallCompleted carries Duration for validation, handler
+	// execution, and the CALLRESULT write.
+	MetricCallCompleted
+	// MetricCallRejected carries Duration and ErrorCode.
+	MetricCallRejected
+	MetricSendReceived
+	MetricSendCompleted
+	MetricSendDropped
+	// MetricOutboundCallRejected fires when Call is rejected before a CALL
+	// frame is ever sent because MaxPendingCalls was reached. Duration is
+	// always zero.
+	MetricOutboundCallRejected
+	// MetricOutboundCallSent fires once the CALL frame has been written.
+	// Duration is always zero.
+	MetricOutboundCallSent
+	// MetricOutboundCallCompleted carries Duration measured from just after
+	// the call was admitted into the pending-call table (i.e. it includes
+	// CALL marshal/write time, not strictly the interval after
+	// MetricOutboundCallSent) to a valid CALLRESULT.
+	MetricOutboundCallCompleted
+	// MetricOutboundCallFailed covers a remote CALLERROR, an undecodable or
+	// invalid confirmation, a transport write failure unrelated to context
+	// cancellation, and the session closing while the call was pending.
+	// ErrorCode is set only for a remote CALLERROR. Note: this also fires
+	// for every pending call during an ordinary graceful Server.Shutdown
+	// (the session closes with ErrServerShutdown), which is expected and
+	// not a regression.
+	MetricOutboundCallFailed
+	// MetricOutboundCallTimeout fires when the call's context deadline
+	// expires, including when that deadline has already passed at the
+	// moment the CALL frame is written. It cannot distinguish
+	// Config.CallTimeout from a deadline the caller supplied on its own
+	// context.
+	MetricOutboundCallTimeout
+	// MetricOutboundCallCanceled fires when the caller cancels its own
+	// context while the call is pending (including if it was already
+	// canceled at the moment the CALL frame is written). This is not a
+	// failure.
+	MetricOutboundCallCanceled
+)
+
+// MetricEvent describes one measurable protocol event. Unlike LogRecord, it
+// is not meant for human-readable diagnostics: it carries Duration for
+// latency observation and has no free-form reason text, so implementations
+// can use Type/Action/ErrorCode directly as low-cardinality metric labels.
+type MetricEvent struct {
+	Type        MetricEventType
+	Identity    string
+	Version     protocol.Version
+	MessageType protocol.MessageTypeID
+	Action      string
+	Duration    time.Duration
+	ErrorCode   ErrorCode
+}
+
+// Metrics receives MetricEvent notifications for connection, CALL, and SEND
+// lifecycle events. Implementations are expected to aggregate events (for
+// example into counters and histograms) rather than perform I/O per event.
+//
+// Record must be safe for concurrent use: it is dispatched from its own
+// goroutine for every event, across every session, so it may run
+// concurrently with itself and carries no ordering guarantee relative to
+// when events logically occurred. A slow or blocking Record implementation
+// never delays the protocol server — recordMetric never waits for Record to
+// return — but if Record is persistently slower than events are produced,
+// the bounded number of concurrent dispatches (maxConcurrentMetricDispatch)
+// is exhausted and further events are silently dropped rather than queued
+// or blocked.
+type Metrics interface {
+	Record(context.Context, MetricEvent)
+}
+
+type MetricsFunc func(context.Context, MetricEvent)
+
+func (f MetricsFunc) Record(ctx context.Context, event MetricEvent) { f(ctx, event) }
+
+// maxConcurrentMetricDispatch bounds how many Metrics.Record calls may be
+// in flight at once across an entire Server. It exists only to cap goroutine
+// growth if an application's Metrics implementation hangs or is persistently
+// slow; healthy implementations never approach it.
+const maxConcurrentMetricDispatch = 1024
+
+// recordMetric is the only dispatch path to Session.metrics. It is used both
+// by the inbound handlers in server.go and by the outbound Call in call.go,
+// since Call only has access to a Session, never a Server. It never blocks
+// the caller: dispatch happens on a separate goroutine, bounded by
+// s.metricSlots, so a slow or hung Metrics implementation cannot delay
+// handler completion (and the handlerSlots it occupies) or Call's prompt
+// return on context cancellation.
+func (s *Session) recordMetric(ctx context.Context, event MetricEvent) {
+	if s.metrics == nil {
+		return
+	}
+	select {
+	case s.metricSlots <- struct{}{}:
+	default:
+		// Every in-flight dispatch slot is occupied by a Record call that
+		// has not returned; drop this event rather than block or queue
+		// unboundedly.
+		return
+	}
+	go func() {
+		defer func() { <-s.metricSlots }()
+		// A diagnostic hook must not be able to take down the protocol server.
+		defer func() { _ = recover() }()
+		s.metrics.Record(ctx, event)
+	}()
+}

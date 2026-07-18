@@ -516,11 +516,50 @@ server, err := csms.New(csms.Config{
 handler 오류 문자열은 전달하지 않습니다. logger가 panic해도 프로토콜 서버는 계속
 동작합니다.
 
+## 메트릭 hook과 서버 상태
+
+특정 metrics 라이브러리 의존 없이 `csms.Metrics`를 주입할 수 있습니다. 세션 연결/해제,
+inbound CALL/SEND, outbound `csms.Call`의 각 단계에서 identity, OCPP version, message
+type, Action, 소요 시간(`Duration`), error code를 담은 이벤트가 전달됩니다.
+
+```go
+server, err := csms.New(csms.Config{
+    Router: router,
+    Metrics: csms.MetricsFunc(func(ctx context.Context, event csms.MetricEvent) {
+        // Prometheus counter/histogram 등 애플리케이션 metrics로 집계합니다.
+    }),
+})
+```
+
+`Metrics`도 `Logger`와 동일하게 panic이 프로토콜 서버에 영향을 주지 않습니다.
+outbound `csms.Call`은 전송 성공(`MetricOutboundCallSent`)과 최종 결과(완료/실패/
+timeout/취소/`MaxPendingCalls` 초과 거부)를 구분해서 관측할 수 있습니다.
+
+`Metrics.Record`는 이벤트마다 별도 goroutine에서 dispatch되어 호출자를 절대 블로킹하지
+않습니다. 느리거나 멈춘 `Record` 구현체가 handler 처리나 outbound `csms.Call`의 취소
+응답성을 지연시키지 않는다는 뜻입니다. 대신 `Record`는 동시 호출에 안전해야 하며, 이벤트
+발생 순서를 보장하지 않습니다. 동시 dispatch 상한(내부적으로 고정된 개수)을 초과하면
+초과분 이벤트는 대기하지 않고 버려집니다 — 정상적인 `Record` 구현체라면 이 상한에 도달할
+일이 없습니다.
+
+서버 상태는 `Server.Snapshot()`과 `Server.Healthy()`로 조회합니다. 라이브러리는 HTTP
+endpoint를 강제하지 않으므로 애플리케이션이 원하는 경로에 직접 연결합니다.
+
+```go
+mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+    json.NewEncoder(w).Encode(struct {
+        Healthy bool               `json:"healthy"`
+        Server  csms.ServerSnapshot `json:"server"`
+    }{server.Healthy(), server.Snapshot()})
+})
+```
+
+[`examples/metrics-hook`](examples/metrics-hook)는 in-process 카운터와 상태 endpoint를
+함께 보여줍니다.
+
 ## 로드맵
 
-- 문서와 버전별·운영 예제 마감
-- release 준비
-- 마지막 단계의 opt-in metrics, snapshot, tracing
+- opt-in Prometheus adapter와 OpenTelemetry tracing hook
 - 유료 OCA OCTT와 공식 인증은 release 이후 선택적으로 수행
 - Charging Station 클라이언트
 

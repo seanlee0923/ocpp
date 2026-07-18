@@ -9,6 +9,37 @@ the same major version.
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `csms.Metrics`/`csms.MetricsFunc` hook — observes session connect/
+  disconnect, inbound CALL/SEND, and each stage of outbound `csms.Call`
+  (sent, completed, failed, timed out, canceled, rejected because
+  `MaxPendingCalls` was reached), carrying identity, OCPP version, message
+  type, Action, elapsed time, and error code. A panicking implementation
+  never affects the protocol server, matching `Logger`. `Record` is
+  dispatched on its own goroutine per event, so a slow or hung
+  implementation never delays handler processing or an outbound
+  `csms.Call`'s cancellation responsiveness (in exchange, `Record` must be
+  concurrency-safe, is not strictly ordered, and events are dropped past a
+  fixed concurrent-dispatch bound).
+- `Server.Snapshot()`/`ServerSnapshot` and `Server.Healthy()` — a server
+  status API exposing active session count, per-session status, and
+  shutdown state. No HTTP endpoint shape is imposed.
+- Added the [`examples/metrics-hook`](examples/metrics-hook) example.
+
+### Fixed
+
+- Moved `LogSessionConnected`/`MetricSessionConnected` recording earlier,
+  before the read loop starts and before `Config.OnConnect` runs. Previously,
+  a Charging Station writing a frame immediately after the upgrade, or an
+  `OnConnect` callback using a blocking `csms.Call` (both supported
+  patterns), could produce another event before the connected event.
+- Outbound `csms.Call` now classifies a send failure caused by an
+  already-expired context as `MetricOutboundCallTimeout`/
+  `MetricOutboundCallCanceled` instead of `MetricOutboundCallFailed`.
+- Remote CALLERROR error-code extraction now uses `errors.As` instead of a
+  raw type assertion, so it stays correct if the error is ever wrapped.
+
 ## [0.1.0] - 2026-07-18
 
 Initial public release. A Go library providing an OCPP-J CSMS WebSocket

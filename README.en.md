@@ -549,11 +549,54 @@ message ID, Action, error code, and a normalized reason. It never carries
 payloads, Authorization headers, certificate contents, idTokens, or handler
 error strings. A panicking logger does not stop the protocol server.
 
+## Metrics hook and server status
+
+A `csms.Metrics` hook can be injected without depending on any specific
+metrics library. It receives an event at each stage of session connect/
+disconnect, inbound CALL/SEND, and outbound `csms.Call`, carrying identity,
+OCPP version, message type, Action, elapsed `Duration`, and an error code.
+
+```go
+server, err := csms.New(csms.Config{
+    Router: router,
+    Metrics: csms.MetricsFunc(func(ctx context.Context, event csms.MetricEvent) {
+        // Aggregate into application metrics, e.g. Prometheus counters/histograms.
+    }),
+})
+```
+
+Like `Logger`, a panicking `Metrics` implementation never affects the
+protocol server. Outbound `csms.Call` distinguishes a successful send
+(`MetricOutboundCallSent`) from its final outcome — completed, failed, timed
+out, canceled, or rejected because `MaxPendingCalls` was reached.
+
+`Metrics.Record` is dispatched on its own goroutine per event, so it never
+blocks the caller — a slow or hung `Record` implementation cannot delay
+handler processing or an outbound `csms.Call`'s cancellation responsiveness.
+In exchange, `Record` must be safe for concurrent use and carries no
+ordering guarantee. If the number of concurrent dispatches exceeds a fixed
+internal bound, further events are dropped rather than queued — a healthy
+`Record` implementation never reaches that bound.
+
+Server status is available via `Server.Snapshot()` and `Server.Healthy()`.
+The library does not impose an HTTP endpoint — wire them into whatever route
+your application prefers.
+
+```go
+mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+    json.NewEncoder(w).Encode(struct {
+        Healthy bool                `json:"healthy"`
+        Server  csms.ServerSnapshot `json:"server"`
+    }{server.Healthy(), server.Snapshot()})
+})
+```
+
+[`examples/metrics-hook`](examples/metrics-hook) shows an in-process counter
+together with a status endpoint.
+
 ## Roadmap
 
-- Finish documentation and per-version/operational examples
-- Prepare for release
-- Opt-in metrics, snapshots, and tracing as a final step
+- Opt-in Prometheus adapter and OpenTelemetry tracing hook
 - Paid OCA OCTT and official certification are optional, post-release steps
 - Charging Station client
 

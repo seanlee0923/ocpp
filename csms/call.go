@@ -3,7 +3,9 @@ package csms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 	"unicode/utf8"
 
 	"github.com/seanlee0923/ocpp/protocol"
@@ -53,9 +55,28 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 	}
 	response, err := session.registerCall(id)
 	if err != nil {
+		if errors.Is(err, ErrTooManyPendingCalls) {
+			session.recordMetric(ctx, MetricEvent{
+				Type: MetricOutboundCallRejected, Identity: session.identity, Version: session.version,
+				MessageType: protocol.CallType, Action: request.ActionName(),
+			})
+		}
 		return zero, err
 	}
 	defer session.unregisterCall(id)
+	start := time.Now()
+	metric := MetricEvent{
+		Identity: session.identity, Version: session.version,
+		MessageType: protocol.CallType, Action: request.ActionName(),
+	}
+	// finish records a terminal outcome for this call. Duration always
+	// measures from just after registerCall admitted the call into the
+	// pending-call table (so it includes CALL marshal/write time), not
+	// strictly from MetricOutboundCallSent.
+	finish := func(ctx context.Context, eventType MetricEventType) {
+		metric.Type, metric.Duration = eventType, time.Since(start)
+		session.recordMetric(ctx, metric)
+	}
 
 	callCtx := ctx
 	cancel := func() {}
@@ -64,28 +85,59 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 	}
 	defer cancel()
 	if err := session.send(callCtx, protocol.Call{ID: id, Action: request.ActionName(), Payload: payload}); err != nil {
+		// context.Background(): this event reports why the call ended, and
+		// callCtx (or even ctx itself) may already be done here, so a
+		// Metrics implementation that defensively no-ops on an
+		// already-canceled ctx must not silently lose it.
+		finish(context.Background(), classifyContextOutcome(callCtx.Err()))
 		return zero, err
 	}
+	metric.Type = MetricOutboundCallSent
+	session.recordMetric(ctx, metric)
 
 	select {
 	case outcome := <-response:
 		if outcome.err != nil {
+			var remoteErr *RemoteCallError
+			if errors.As(outcome.err, &remoteErr) {
+				metric.ErrorCode = remoteErr.Code
+			}
+			finish(ctx, MetricOutboundCallFailed)
 			return zero, outcome.err
 		}
 		if err := zero.ValidateJSON(outcome.result.Payload); err != nil {
+			finish(ctx, MetricOutboundCallFailed)
 			return zero, fmt.Errorf("invalid %s confirmation from Charging Station: %w", request.ActionName(), err)
 		}
 		if err := json.Unmarshal(outcome.result.Payload, &zero); err != nil {
+			finish(ctx, MetricOutboundCallFailed)
 			return zero, fmt.Errorf("decode %s confirmation: %w", request.ActionName(), err)
 		}
+		finish(ctx, MetricOutboundCallCompleted)
 		return zero, nil
 	case <-callCtx.Done():
+		finish(context.Background(), classifyContextOutcome(callCtx.Err()))
 		return zero, callCtx.Err()
 	case <-session.Done():
+		finish(context.Background(), MetricOutboundCallFailed)
 		if err := session.Err(); err != nil {
 			return zero, err
 		}
 		return zero, ErrSessionClosed
+	}
+}
+
+// classifyContextOutcome maps a context's terminal error to the matching
+// outbound-call metric type. A nil or non-context error (for example a
+// transport write failure unrelated to ctx) yields MetricOutboundCallFailed.
+func classifyContextOutcome(err error) MetricEventType {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return MetricOutboundCallTimeout
+	case errors.Is(err, context.Canceled):
+		return MetricOutboundCallCanceled
+	default:
+		return MetricOutboundCallFailed
 	}
 }
 

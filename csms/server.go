@@ -90,6 +90,7 @@ type Config struct {
 	OnConnect             func(*Session)
 	OnDisconnect          func(*Session, error)
 	Logger                Logger
+	Metrics               Metrics
 	Security              SecurityConfig
 }
 
@@ -100,6 +101,7 @@ type Server struct {
 	sessions            map[string]*sessionEntry
 	reservationSequence atomic.Uint64
 	shuttingDown        atomic.Bool
+	metricSlots         chan struct{}
 }
 
 type sessionEntry struct {
@@ -175,8 +177,9 @@ func New(config Config) (*Server, error) {
 		protocols[i] = string(version)
 	}
 	return &Server{
-		config:   config,
-		sessions: make(map[string]*sessionEntry),
+		config:      config,
+		sessions:    make(map[string]*sessionEntry),
+		metricSlots: make(chan struct{}, maxConcurrentMetricDispatch),
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: config.HandshakeTimeout,
 			Subprotocols:     protocols,
@@ -260,6 +263,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		handlerSlots:      make(chan struct{}, s.config.MaxConcurrentHandlers),
 		readDone:          make(chan struct{}),
 		uniqueIDGenerator: s.config.UniqueIDGenerator,
+		metrics:           s.config.Metrics,
+		metricSlots:       s.metricSlots,
 		closed:            make(chan struct{}), connectedAt: time.Now(),
 	}
 	session.state.Store(uint32(SessionActive))
@@ -278,6 +283,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if previous != nil {
 		_ = previous.closeWithError(ErrSessionReplaced)
 	}
+	// Record Connected before starting the read loop or calling OnConnect:
+	// both can synchronously produce other events for this session (an
+	// inbound CALL as soon as the Charging Station writes one, or an
+	// outbound csms.Call from within OnConnect, which is a documented
+	// supported pattern), and Connected must be observable first.
+	s.log(session.Context(), sessionLogRecord(session, LogInfo, LogSessionConnected))
+	session.recordMetric(session.Context(), MetricEvent{
+		Type: MetricSessionConnected, Identity: session.identity, Version: session.version,
+	})
 	conn.SetReadLimit(s.config.ReadLimit)
 	go session.pingLoop()
 	go session.idleLoop()
@@ -289,7 +303,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.config.OnConnect != nil {
 		s.config.OnConnect(session)
 	}
-	s.log(session.Context(), sessionLogRecord(session, LogInfo, LogSessionConnected))
 	err = <-readResult
 	_ = session.closeWithError(err)
 	s.unregisterSession(session)
@@ -299,6 +312,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	record := sessionLogRecord(session, LogInfo, LogSessionDisconnected)
 	record.Reason = disconnectReason(err)
 	s.log(context.Background(), record)
+	session.recordMetric(context.Background(), MetricEvent{
+		Type: MetricSessionDisconnected, Identity: session.identity, Version: session.version,
+		Duration: time.Since(session.connectedAt),
+	})
 }
 
 func (s *Server) Session(identity string) (*Session, bool) {
@@ -324,6 +341,29 @@ func (s *Server) Sessions() []*Session {
 }
 
 func (s *Server) SessionCount() int { return len(s.Sessions()) }
+
+// ServerSnapshot is a point-in-time view of server status, suitable for a
+// health or readiness endpoint the application wires up itself.
+type ServerSnapshot struct {
+	ActiveSessions int
+	ShuttingDown   bool
+	Sessions       []SessionInfo
+}
+
+// Snapshot returns the server's current status. It is safe to call from any
+// goroutine and does not block on session I/O.
+func (s *Server) Snapshot() ServerSnapshot {
+	sessions := s.Sessions()
+	infos := make([]SessionInfo, len(sessions))
+	for i, session := range sessions {
+		infos[i] = session.Info()
+	}
+	return ServerSnapshot{ActiveSessions: len(infos), ShuttingDown: s.shuttingDown.Load(), Sessions: infos}
+}
+
+// Healthy reports whether the server is still accepting new connections. It
+// becomes false as soon as Shutdown is called.
+func (s *Server) Healthy() bool { return !s.shuttingDown.Load() }
 
 // Shutdown rejects new connections, closes active sessions and waits until
 // they finish or ctx expires. Shutdown is terminal; a Server cannot accept new
@@ -528,19 +568,27 @@ func (s *Server) readLoop(session *Session) error {
 }
 
 func (s *Server) handleSend(ctx context.Context, session *Session, send protocol.Send) {
+	start := time.Now()
 	record := sessionLogRecord(session, LogDebug, LogSendReceived)
 	record.MessageType, record.MessageID, record.Action = protocol.SendType, send.ID, send.Action
+	metric := MetricEvent{Identity: session.identity, Version: session.version, MessageType: protocol.SendType, Action: send.Action}
 	defer func() {
 		if recover() != nil {
 			record.Level, record.Event, record.Reason = LogError, LogSendDropped, "handler_panic"
 			s.log(ctx, record)
+			metric.Type, metric.Duration = MetricSendDropped, time.Since(start)
+			session.recordMetric(ctx, metric)
 		}
 	}()
 	s.log(ctx, record)
+	metric.Type = MetricSendReceived
+	session.recordMetric(ctx, metric)
 	handler, ok := s.config.Router.lookup(session.version, send.Action)
 	if !ok {
 		record.Level, record.Event, record.Reason = LogWarn, LogSendDropped, "action_not_registered"
 		s.log(ctx, record)
+		metric.Type, metric.Duration = MetricSendDropped, time.Since(start)
+		session.recordMetric(ctx, metric)
 		return
 	}
 	// OCPP 2.1 SEND is unconfirmed. Handler and validation failures are
@@ -548,29 +596,41 @@ func (s *Server) handleSend(ctx context.Context, session *Session, send protocol
 	if _, err := handler(ctx, session, send.Payload); err != nil {
 		record.Level, record.Event, record.Reason = LogWarn, LogSendDropped, "handler_or_validation_error"
 		s.log(ctx, record)
+		metric.Type, metric.Duration = MetricSendDropped, time.Since(start)
+		session.recordMetric(ctx, metric)
 		return
 	}
 	record.Level, record.Event, record.Reason = LogDebug, LogSendCompleted, ""
 	s.log(ctx, record)
+	metric.Type, metric.Duration = MetricSendCompleted, time.Since(start)
+	session.recordMetric(ctx, metric)
 }
 
 func (s *Server) handleCall(ctx context.Context, session *Session, call protocol.Call) {
+	start := time.Now()
 	record := sessionLogRecord(session, LogDebug, LogCallReceived)
 	record.MessageType, record.MessageID, record.Action = protocol.CallType, call.ID, call.Action
+	metric := MetricEvent{Identity: session.identity, Version: session.version, MessageType: protocol.CallType, Action: call.Action}
 	defer func() {
 		if recover() != nil {
 			record.Level, record.Event, record.ErrorCode, record.Reason = LogError, LogCallRejected, InternalError, "handler_panic"
 			s.log(ctx, record)
+			metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), InternalError
+			session.recordMetric(ctx, metric)
 			_ = session.send(ctx, protocol.CallError{
 				ID: call.ID, Code: string(InternalError), Description: "internal error", Details: json.RawMessage(`{}`),
 			})
 		}
 	}()
 	s.log(ctx, record)
+	metric.Type = MetricCallReceived
+	session.recordMetric(ctx, metric)
 	handler, ok := s.config.Router.lookup(session.version, call.Action)
 	if !ok {
 		record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, NotImplemented, "action_not_registered"
 		s.log(ctx, record)
+		metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), NotImplemented
+		session.recordMetric(ctx, metric)
 		_ = session.send(ctx, protocol.CallError{ID: call.ID, Code: string(NotImplemented), Description: "action is not registered"})
 		return
 	}
@@ -579,10 +639,14 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 		if err := session.result(ctx, call.ID, response); err != nil {
 			record.Level, record.Event, record.ErrorCode, record.Reason = LogError, LogCallRejected, InternalError, "response_write_failed"
 			s.log(ctx, record)
+			metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), InternalError
+			session.recordMetric(ctx, metric)
 			return
 		}
 		record.Level, record.Event = LogDebug, LogCallCompleted
 		s.log(ctx, record)
+		metric.Type, metric.Duration = MetricCallCompleted, time.Since(start)
+		session.recordMetric(ctx, metric)
 		return
 	}
 	callError := &CallError{Code: InternalError, Description: "internal error", Details: map[string]any{}}
@@ -603,6 +667,8 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 	}
 	record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, callError.Code, "handler_error"
 	s.log(ctx, record)
+	metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), callError.Code
+	session.recordMetric(ctx, metric)
 	_ = session.send(ctx, protocol.CallError{ID: call.ID, Code: string(callError.Code), Description: callError.Description, Details: raw})
 }
 
