@@ -93,40 +93,32 @@ func (profile *Profile) HandleNotifyReport(handler NotifyReportHandler) error {
 }
 
 func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v201.GetVariablesRequest) (v201.GetVariablesConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v201.GetVariablesConfirmation{}, err
-	}
-	return csms.Call[v201.GetVariablesRequest, v201.GetVariablesConfirmation](ctx, session, request)
+	return callBooted[v201.GetVariablesRequest, v201.GetVariablesConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallSetVariables(ctx context.Context, session *csms.Session, request v201.SetVariablesRequest) (v201.SetVariablesConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v201.SetVariablesConfirmation{}, err
-	}
-	return csms.Call[v201.SetVariablesRequest, v201.SetVariablesConfirmation](ctx, session, request)
+	return callBooted[v201.SetVariablesRequest, v201.SetVariablesConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallGetBaseReport(ctx context.Context, session *csms.Session, request v201.GetBaseReportRequest) (v201.GetBaseReportConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v201.GetBaseReportConfirmation{}, err
-	}
-	return csms.Call[v201.GetBaseReportRequest, v201.GetBaseReportConfirmation](ctx, session, request)
+	return callBooted[v201.GetBaseReportRequest, v201.GetBaseReportConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallRequestStartTransaction(ctx context.Context, session *csms.Session, request v201.RequestStartTransactionRequest) (v201.RequestStartTransactionConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v201.RequestStartTransactionConfirmation{}, err
-	}
-	return csms.Call[v201.RequestStartTransactionRequest, v201.RequestStartTransactionConfirmation](ctx, session, request)
+	return callBooted[v201.RequestStartTransactionRequest, v201.RequestStartTransactionConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallRequestStopTransaction(ctx context.Context, session *csms.Session, request v201.RequestStopTransactionRequest) (v201.RequestStopTransactionConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v201.RequestStopTransactionConfirmation{}, err
-	}
-	return csms.Call[v201.RequestStopTransactionRequest, v201.RequestStopTransactionConfirmation](ctx, session, request)
+	return callBooted[v201.RequestStopTransactionRequest, v201.RequestStopTransactionConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallReset(ctx context.Context, session *csms.Session, request v201.ResetRequest) (v201.ResetConfirmation, error) {
+	return callBooted[v201.ResetRequest, v201.ResetConfirmation](profile, ctx, session, request)
+}
+
+// callBooted requires an accepted BootNotification before delegating to
+// csms.Call, matching the requireBooted guard every Call<Action> method uses.
+func callBooted[Req, Conf protocol.Payload](profile *Profile, ctx context.Context, session *csms.Session, request Req) (Conf, error) {
+	var zero Conf
 	if err := profile.requireBooted(session); err != nil {
-		return v201.ResetConfirmation{}, err
+		return zero, err
 	}
-	return csms.Call[v201.ResetRequest, v201.ResetConfirmation](ctx, session, request)
+	return csms.Call[Req, Conf](ctx, session, request)
 }
 
 func (profile *Profile) requireBooted(session *csms.Session) error {

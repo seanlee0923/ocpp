@@ -181,196 +181,110 @@ func (profile *Profile) HandlePublishFirmwareStatusNotification(handler PublishF
 }
 
 func (profile *Profile) CallGetVariables(ctx context.Context, session *csms.Session, request v21.GetVariablesRequest) (v21.GetVariablesConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.GetVariablesConfirmation{}, err
-	}
-	return csms.Call[v21.GetVariablesRequest, v21.GetVariablesConfirmation](ctx, session, request)
+	return callBooted[v21.GetVariablesRequest, v21.GetVariablesConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallSetVariables(ctx context.Context, session *csms.Session, request v21.SetVariablesRequest) (v21.SetVariablesConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.SetVariablesConfirmation{}, err
-	}
-	return csms.Call[v21.SetVariablesRequest, v21.SetVariablesConfirmation](ctx, session, request)
+	return callBooted[v21.SetVariablesRequest, v21.SetVariablesConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallGetBaseReport(ctx context.Context, session *csms.Session, request v21.GetBaseReportRequest) (v21.GetBaseReportConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.GetBaseReportConfirmation{}, err
-	}
-	return csms.Call[v21.GetBaseReportRequest, v21.GetBaseReportConfirmation](ctx, session, request)
+	return callBooted[v21.GetBaseReportRequest, v21.GetBaseReportConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallRequestStartTransaction(ctx context.Context, session *csms.Session, request v21.RequestStartTransactionRequest) (v21.RequestStartTransactionConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.RequestStartTransactionConfirmation{}, err
-	}
-	return csms.Call[v21.RequestStartTransactionRequest, v21.RequestStartTransactionConfirmation](ctx, session, request)
+	return callBooted[v21.RequestStartTransactionRequest, v21.RequestStartTransactionConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallRequestStopTransaction(ctx context.Context, session *csms.Session, request v21.RequestStopTransactionRequest) (v21.RequestStopTransactionConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.RequestStopTransactionConfirmation{}, err
-	}
-	return csms.Call[v21.RequestStopTransactionRequest, v21.RequestStopTransactionConfirmation](ctx, session, request)
+	return callBooted[v21.RequestStopTransactionRequest, v21.RequestStopTransactionConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallReset(ctx context.Context, session *csms.Session, request v21.ResetRequest) (v21.ResetConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.ResetConfirmation{}, err
-	}
-	return csms.Call[v21.ResetRequest, v21.ResetConfirmation](ctx, session, request)
+	return callBooted[v21.ResetRequest, v21.ResetConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallGetChargingProfiles(ctx context.Context, session *csms.Session, request v21.GetChargingProfilesRequest) (v21.GetChargingProfilesConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.GetChargingProfilesConfirmation{}, err
-	}
-	return csms.Call[v21.GetChargingProfilesRequest, v21.GetChargingProfilesConfirmation](ctx, session, request)
+	return callBooted[v21.GetChargingProfilesRequest, v21.GetChargingProfilesConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallSetChargingProfile(ctx context.Context, session *csms.Session, request v21.SetChargingProfileRequest) (v21.SetChargingProfileConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.SetChargingProfileConfirmation{}, err
-	}
-	return csms.Call[v21.SetChargingProfileRequest, v21.SetChargingProfileConfirmation](ctx, session, request)
+	return callBooted[v21.SetChargingProfileRequest, v21.SetChargingProfileConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallClearChargingProfile(ctx context.Context, session *csms.Session, request v21.ClearChargingProfileRequest) (v21.ClearChargingProfileConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.ClearChargingProfileConfirmation{}, err
-	}
-	return csms.Call[v21.ClearChargingProfileRequest, v21.ClearChargingProfileConfirmation](ctx, session, request)
+	return callBooted[v21.ClearChargingProfileRequest, v21.ClearChargingProfileConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallNotifyAllowedEnergyTransfer(ctx context.Context, session *csms.Session, request v21.NotifyAllowedEnergyTransferRequest) (v21.NotifyAllowedEnergyTransferConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.NotifyAllowedEnergyTransferConfirmation{}, err
-	}
-	return csms.Call[v21.NotifyAllowedEnergyTransferRequest, v21.NotifyAllowedEnergyTransferConfirmation](ctx, session, request)
+	return callBooted[v21.NotifyAllowedEnergyTransferRequest, v21.NotifyAllowedEnergyTransferConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallUsePriorityCharging(ctx context.Context, session *csms.Session, request v21.UsePriorityChargingRequest) (v21.UsePriorityChargingConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.UsePriorityChargingConfirmation{}, err
-	}
-	return csms.Call[v21.UsePriorityChargingRequest, v21.UsePriorityChargingConfirmation](ctx, session, request)
+	return callBooted[v21.UsePriorityChargingRequest, v21.UsePriorityChargingConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallUpdateDynamicSchedule(ctx context.Context, session *csms.Session, request v21.UpdateDynamicScheduleRequest) (v21.UpdateDynamicScheduleConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.UpdateDynamicScheduleConfirmation{}, err
-	}
-	return csms.Call[v21.UpdateDynamicScheduleRequest, v21.UpdateDynamicScheduleConfirmation](ctx, session, request)
+	return callBooted[v21.UpdateDynamicScheduleRequest, v21.UpdateDynamicScheduleConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallAFRRSignal(ctx context.Context, session *csms.Session, request v21.AFRRSignalRequest) (v21.AFRRSignalConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.AFRRSignalConfirmation{}, err
-	}
-	return csms.Call[v21.AFRRSignalRequest, v21.AFRRSignalConfirmation](ctx, session, request)
+	return callBooted[v21.AFRRSignalRequest, v21.AFRRSignalConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallSetDERControl(ctx context.Context, session *csms.Session, request v21.SetDERControlRequest) (v21.SetDERControlConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.SetDERControlConfirmation{}, err
-	}
-	return csms.Call[v21.SetDERControlRequest, v21.SetDERControlConfirmation](ctx, session, request)
+	return callBooted[v21.SetDERControlRequest, v21.SetDERControlConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallGetDERControl(ctx context.Context, session *csms.Session, request v21.GetDERControlRequest) (v21.GetDERControlConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.GetDERControlConfirmation{}, err
-	}
-	return csms.Call[v21.GetDERControlRequest, v21.GetDERControlConfirmation](ctx, session, request)
+	return callBooted[v21.GetDERControlRequest, v21.GetDERControlConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallClearDERControl(ctx context.Context, session *csms.Session, request v21.ClearDERControlRequest) (v21.ClearDERControlConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.ClearDERControlConfirmation{}, err
-	}
-	return csms.Call[v21.ClearDERControlRequest, v21.ClearDERControlConfirmation](ctx, session, request)
+	return callBooted[v21.ClearDERControlRequest, v21.ClearDERControlConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallSetDefaultTariff(ctx context.Context, session *csms.Session, request v21.SetDefaultTariffRequest) (v21.SetDefaultTariffConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.SetDefaultTariffConfirmation{}, err
-	}
-	return csms.Call[v21.SetDefaultTariffRequest, v21.SetDefaultTariffConfirmation](ctx, session, request)
+	return callBooted[v21.SetDefaultTariffRequest, v21.SetDefaultTariffConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallClearTariffs(ctx context.Context, session *csms.Session, request v21.ClearTariffsRequest) (v21.ClearTariffsConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.ClearTariffsConfirmation{}, err
-	}
-	return csms.Call[v21.ClearTariffsRequest, v21.ClearTariffsConfirmation](ctx, session, request)
+	return callBooted[v21.ClearTariffsRequest, v21.ClearTariffsConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallChangeTransactionTariff(ctx context.Context, session *csms.Session, request v21.ChangeTransactionTariffRequest) (v21.ChangeTransactionTariffConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.ChangeTransactionTariffConfirmation{}, err
-	}
-	return csms.Call[v21.ChangeTransactionTariffRequest, v21.ChangeTransactionTariffConfirmation](ctx, session, request)
+	return callBooted[v21.ChangeTransactionTariffRequest, v21.ChangeTransactionTariffConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallCostUpdated(ctx context.Context, session *csms.Session, request v21.CostUpdatedRequest) (v21.CostUpdatedConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.CostUpdatedConfirmation{}, err
-	}
-	return csms.Call[v21.CostUpdatedRequest, v21.CostUpdatedConfirmation](ctx, session, request)
+	return callBooted[v21.CostUpdatedRequest, v21.CostUpdatedConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallGetTariffs(ctx context.Context, session *csms.Session, request v21.GetTariffsRequest) (v21.GetTariffsConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.GetTariffsConfirmation{}, err
-	}
-	return csms.Call[v21.GetTariffsRequest, v21.GetTariffsConfirmation](ctx, session, request)
+	return callBooted[v21.GetTariffsRequest, v21.GetTariffsConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallNotifyWebPaymentStarted(ctx context.Context, session *csms.Session, request v21.NotifyWebPaymentStartedRequest) (v21.NotifyWebPaymentStartedConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.NotifyWebPaymentStartedConfirmation{}, err
-	}
-	return csms.Call[v21.NotifyWebPaymentStartedRequest, v21.NotifyWebPaymentStartedConfirmation](ctx, session, request)
+	return callBooted[v21.NotifyWebPaymentStartedRequest, v21.NotifyWebPaymentStartedConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallRequestBatterySwap(ctx context.Context, session *csms.Session, request v21.RequestBatterySwapRequest) (v21.RequestBatterySwapConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.RequestBatterySwapConfirmation{}, err
-	}
-	return csms.Call[v21.RequestBatterySwapRequest, v21.RequestBatterySwapConfirmation](ctx, session, request)
+	return callBooted[v21.RequestBatterySwapRequest, v21.RequestBatterySwapConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallGetPeriodicEventStream(ctx context.Context, session *csms.Session, request v21.GetPeriodicEventStreamRequest) (v21.GetPeriodicEventStreamConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.GetPeriodicEventStreamConfirmation{}, err
-	}
-	return csms.Call[v21.GetPeriodicEventStreamRequest, v21.GetPeriodicEventStreamConfirmation](ctx, session, request)
+	return callBooted[v21.GetPeriodicEventStreamRequest, v21.GetPeriodicEventStreamConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallAdjustPeriodicEventStream(ctx context.Context, session *csms.Session, request v21.AdjustPeriodicEventStreamRequest) (v21.AdjustPeriodicEventStreamConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.AdjustPeriodicEventStreamConfirmation{}, err
-	}
-	return csms.Call[v21.AdjustPeriodicEventStreamRequest, v21.AdjustPeriodicEventStreamConfirmation](ctx, session, request)
+	return callBooted[v21.AdjustPeriodicEventStreamRequest, v21.AdjustPeriodicEventStreamConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallCertificateSigned(ctx context.Context, session *csms.Session, request v21.CertificateSignedRequest) (v21.CertificateSignedConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.CertificateSignedConfirmation{}, err
-	}
-	return csms.Call[v21.CertificateSignedRequest, v21.CertificateSignedConfirmation](ctx, session, request)
+	return callBooted[v21.CertificateSignedRequest, v21.CertificateSignedConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallInstallCertificate(ctx context.Context, session *csms.Session, request v21.InstallCertificateRequest) (v21.InstallCertificateConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.InstallCertificateConfirmation{}, err
-	}
-	return csms.Call[v21.InstallCertificateRequest, v21.InstallCertificateConfirmation](ctx, session, request)
+	return callBooted[v21.InstallCertificateRequest, v21.InstallCertificateConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallDeleteCertificate(ctx context.Context, session *csms.Session, request v21.DeleteCertificateRequest) (v21.DeleteCertificateConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.DeleteCertificateConfirmation{}, err
-	}
-	return csms.Call[v21.DeleteCertificateRequest, v21.DeleteCertificateConfirmation](ctx, session, request)
+	return callBooted[v21.DeleteCertificateRequest, v21.DeleteCertificateConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallGetInstalledCertificateIds(ctx context.Context, session *csms.Session, request v21.GetInstalledCertificateIdsRequest) (v21.GetInstalledCertificateIdsConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.GetInstalledCertificateIdsConfirmation{}, err
-	}
-	return csms.Call[v21.GetInstalledCertificateIdsRequest, v21.GetInstalledCertificateIdsConfirmation](ctx, session, request)
+	return callBooted[v21.GetInstalledCertificateIdsRequest, v21.GetInstalledCertificateIdsConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallUpdateFirmware(ctx context.Context, session *csms.Session, request v21.UpdateFirmwareRequest) (v21.UpdateFirmwareConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.UpdateFirmwareConfirmation{}, err
-	}
-	return csms.Call[v21.UpdateFirmwareRequest, v21.UpdateFirmwareConfirmation](ctx, session, request)
+	return callBooted[v21.UpdateFirmwareRequest, v21.UpdateFirmwareConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallPublishFirmware(ctx context.Context, session *csms.Session, request v21.PublishFirmwareRequest) (v21.PublishFirmwareConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v21.PublishFirmwareConfirmation{}, err
-	}
-	return csms.Call[v21.PublishFirmwareRequest, v21.PublishFirmwareConfirmation](ctx, session, request)
+	return callBooted[v21.PublishFirmwareRequest, v21.PublishFirmwareConfirmation](profile, ctx, session, request)
 }
 func (profile *Profile) CallUnpublishFirmware(ctx context.Context, session *csms.Session, request v21.UnpublishFirmwareRequest) (v21.UnpublishFirmwareConfirmation, error) {
+	return callBooted[v21.UnpublishFirmwareRequest, v21.UnpublishFirmwareConfirmation](profile, ctx, session, request)
+}
+
+// callBooted requires an accepted BootNotification before delegating to
+// csms.Call, matching the requireBooted guard every Call<Action> method uses.
+func callBooted[Req, Conf protocol.Payload](profile *Profile, ctx context.Context, session *csms.Session, request Req) (Conf, error) {
+	var zero Conf
 	if err := profile.requireBooted(session); err != nil {
-		return v21.UnpublishFirmwareConfirmation{}, err
+		return zero, err
 	}
-	return csms.Call[v21.UnpublishFirmwareRequest, v21.UnpublishFirmwareConfirmation](ctx, session, request)
+	return csms.Call[Req, Conf](ctx, session, request)
 }
 
 func (profile *Profile) requireBooted(session *csms.Session) error {

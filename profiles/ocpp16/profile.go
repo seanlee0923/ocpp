@@ -119,52 +119,41 @@ func (profile *Profile) HandleDataTransfer(handler DataTransferHandler) error {
 }
 
 func (profile *Profile) CallDataTransfer(ctx context.Context, session *csms.Session, request v16.DataTransferRequest) (v16.DataTransferConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v16.DataTransferConfirmation{}, err
-	}
-	return csms.Call[v16.DataTransferRequest, v16.DataTransferConfirmation](ctx, session, request)
+	return callBooted[v16.DataTransferRequest, v16.DataTransferConfirmation](profile, ctx, session, request)
 }
 
 func (profile *Profile) CallReset(ctx context.Context, session *csms.Session, request v16.ResetRequest) (v16.ResetConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v16.ResetConfirmation{}, err
-	}
-	return csms.Call[v16.ResetRequest, v16.ResetConfirmation](ctx, session, request)
+	return callBooted[v16.ResetRequest, v16.ResetConfirmation](profile, ctx, session, request)
 }
 
 func (profile *Profile) CallRemoteStartTransaction(ctx context.Context, session *csms.Session, request v16.RemoteStartTransactionRequest) (v16.RemoteStartTransactionConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v16.RemoteStartTransactionConfirmation{}, err
-	}
-	return csms.Call[v16.RemoteStartTransactionRequest, v16.RemoteStartTransactionConfirmation](ctx, session, request)
+	return callBooted[v16.RemoteStartTransactionRequest, v16.RemoteStartTransactionConfirmation](profile, ctx, session, request)
 }
 
 func (profile *Profile) CallRemoteStopTransaction(ctx context.Context, session *csms.Session, request v16.RemoteStopTransactionRequest) (v16.RemoteStopTransactionConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v16.RemoteStopTransactionConfirmation{}, err
-	}
-	return csms.Call[v16.RemoteStopTransactionRequest, v16.RemoteStopTransactionConfirmation](ctx, session, request)
+	return callBooted[v16.RemoteStopTransactionRequest, v16.RemoteStopTransactionConfirmation](profile, ctx, session, request)
 }
 
 func (profile *Profile) CallChangeAvailability(ctx context.Context, session *csms.Session, request v16.ChangeAvailabilityRequest) (v16.ChangeAvailabilityConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v16.ChangeAvailabilityConfirmation{}, err
-	}
-	return csms.Call[v16.ChangeAvailabilityRequest, v16.ChangeAvailabilityConfirmation](ctx, session, request)
+	return callBooted[v16.ChangeAvailabilityRequest, v16.ChangeAvailabilityConfirmation](profile, ctx, session, request)
 }
 
 func (profile *Profile) CallUnlockConnector(ctx context.Context, session *csms.Session, request v16.UnlockConnectorRequest) (v16.UnlockConnectorConfirmation, error) {
-	if err := profile.requireBooted(session); err != nil {
-		return v16.UnlockConnectorConfirmation{}, err
-	}
-	return csms.Call[v16.UnlockConnectorRequest, v16.UnlockConnectorConfirmation](ctx, session, request)
+	return callBooted[v16.UnlockConnectorRequest, v16.UnlockConnectorConfirmation](profile, ctx, session, request)
 }
 
 func (profile *Profile) CallTriggerMessage(ctx context.Context, session *csms.Session, request v16.TriggerMessageRequest) (v16.TriggerMessageConfirmation, error) {
+	return callBooted[v16.TriggerMessageRequest, v16.TriggerMessageConfirmation](profile, ctx, session, request)
+}
+
+// callBooted requires an accepted BootNotification before delegating to
+// csms.Call, matching the requireBooted guard every Call<Action> method uses.
+func callBooted[Req, Conf protocol.Payload](profile *Profile, ctx context.Context, session *csms.Session, request Req) (Conf, error) {
+	var zero Conf
 	if err := profile.requireBooted(session); err != nil {
-		return v16.TriggerMessageConfirmation{}, err
+		return zero, err
 	}
-	return csms.Call[v16.TriggerMessageRequest, v16.TriggerMessageConfirmation](ctx, session, request)
+	return csms.Call[Req, Conf](ctx, session, request)
 }
 
 func (profile *Profile) requireBooted(session *csms.Session) error {
