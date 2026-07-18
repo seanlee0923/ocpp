@@ -524,6 +524,10 @@ handler 오류 문자열은 전달하지 않습니다. logger가 panic해도 프
 - 유료 OCA OCTT와 공식 인증은 release 이후 선택적으로 수행
 - Charging Station 클라이언트
 
+## 변경 이력
+
+[CHANGELOG.md](CHANGELOG.md)
+
 ## 라이선스
 
 [MIT](LICENSE)

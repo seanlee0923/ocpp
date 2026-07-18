@@ -557,6 +557,10 @@ error strings. A panicking logger does not stop the protocol server.
 - Paid OCA OCTT and official certification are optional, post-release steps
 - Charging Station client
 
+## Changelog
+
+[CHANGELOG.en.md](CHANGELOG.en.md)
+
 ## License
 
 [MIT](LICENSE)
