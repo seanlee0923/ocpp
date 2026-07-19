@@ -2,6 +2,11 @@
 
 **한국어** | [English](README.en.md)
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/seanlee0923/ocpp.svg)](https://pkg.go.dev/github.com/seanlee0923/ocpp)
+[![CI](https://github.com/seanlee0923/ocpp/actions/workflows/ci.yml/badge.svg)](https://github.com/seanlee0923/ocpp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/seanlee0923/ocpp/branch/main/graph/badge.svg)](https://codecov.io/gh/seanlee0923/ocpp)
+[![Go Report Card](https://goreportcard.com/badge/github.com/seanlee0923/ocpp)](https://goreportcard.com/report/github.com/seanlee0923/ocpp)
+
 Go로 작성된 OCPP-J CSMS WebSocket 서버 라이브러리입니다. 하나의 전송 계층에서
 OCPP 1.6, 2.0.1, 2.1을 처리하며 공식 JSON Schema 기반 메시지 타입과 타입 안전
 라우팅을 제공합니다.
@@ -457,6 +462,15 @@ GOCACHE=/tmp/ocpp-go-build-cache go test -race ./...
 ```
 
 WebSocket 통합 테스트는 로컬 loopback port를 사용합니다.
+
+패키지 경계를 넘는 실제 실행 커버리지(생성 타입 365개 포함, CI/Codecov와 동일 기준)는
+다음으로 측정합니다. 2026-07-19 기준 66.5%이며, `csms`/`internal` 등 손으로 작성한
+핵심 패키지는 개별적으로 80%대입니다.
+
+```sh
+GOCACHE=/tmp/ocpp-go-build-cache go test -coverpkg=./... -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out | tail -1
+```
 
 일반 suite에는 16개 세션에서 총 800개 CALL을 처리하는 bounded load와 concurrent
 outbound pending-call 상한 테스트가 포함됩니다. 반복적인 비정상 연결 종료 뒤 세션,

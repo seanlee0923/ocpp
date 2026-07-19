@@ -45,6 +45,11 @@ the same major version.
   an outbound `Call` span started inside it form a correct parent-child
   relationship. Unlike `MetricEvent.Identity`, a span attribute does not
   create a persistent time series per value, so attaching identity is safe.
+- Added GoDoc, CI, Codecov, and Go Report Card badges to the README. CI now
+  measures coverage with
+  `go test -coverpkg=./... -coverprofile=coverage.out ./...` and uploads it
+  to Codecov (`fail_ci_if_error: false`, so CI itself doesn't fail before the
+  Codecov account is connected).
 
 ### Fixed
 

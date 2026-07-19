@@ -41,6 +41,10 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   확인(inbound handler span과 그 안에서 실행한 outbound `Call` span이 부모-자식
   관계로 정확히 이어지는 것까지 검증)했다. `MetricEvent.Identity`와 달리 span
   attribute는 값마다 time series를 만들지 않아 identity를 붙여도 안전하다.
+- README에 GoDoc, CI, Codecov, Go Report Card 배지를 추가했다. CI가
+  `go test -coverpkg=./... -coverprofile=coverage.out ./...`로 커버리지를
+  측정해 Codecov에 업로드한다(`fail_ci_if_error: false`라 Codecov 계정
+  연결 전에도 CI 자체는 실패하지 않는다).
 
 ### Fixed
 
