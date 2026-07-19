@@ -35,7 +35,7 @@ return confirmation, &csms.CallError{
 ```
 
 OCPP 2.1 SEND는 `csms.HandleSend`로 등록한다. SEND에는 프로토콜 응답이 없으므로 validation
-또는 handler 오류는 logger에서만 관찰할 수 있다.
+또는 handler 오류는 `csms.Logger`와 `csms.Metrics`(`MetricSendDropped`)로만 관찰할 수 있다.
 
 Router middleware는 등록 순서로 handler를 감싸며 여러 profile이 Router를 공유할 때는
 전달받은 version을 반드시 확인해야 한다.

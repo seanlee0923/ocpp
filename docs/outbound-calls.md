@@ -32,5 +32,10 @@ if errors.As(err, &remote) {
 주입할 수 있다. panic, 빈 값, 36자 초과는 `ErrUniqueIDGeneration`, 같은 세션의 in-flight
 중복은 `ErrDuplicateUniqueID`로 반환된다.
 
+`Config.Metrics`를 설정하면 `Call`의 전 단계(전송, 완료, 원격 오류·응답 디코드 실패,
+timeout, 취소, `MaxPendingCalls` 초과 거부)가 `MetricOutboundCallSent`/`Completed`/
+`Failed`/`Timeout`/`Canceled`/`Rejected` 이벤트로 관측된다. 자세한 내용은
+[운영 환경 구성](production.md)의 "관측과 민감 정보"를 참고한다.
+
 BootNotification 이후 실제 session으로 Reset을 호출하는 흐름은
 [`examples/outbound-call`](../examples/outbound-call)에 있다.

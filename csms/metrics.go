@@ -59,7 +59,14 @@ const (
 	// MetricOutboundCallCanceled fires when the caller cancels its own
 	// context while the call is pending (including if it was already
 	// canceled at the moment the CALL frame is written). This is not a
-	// failure.
+	// failure. Caveat: context.Context only exposes context.Canceled, not
+	// why a context was canceled, so if a caller ties Call's ctx to
+	// Session.Context() (or another context whose cancellation is driven by
+	// the session's own lifecycle rather than the caller's own decision),
+	// the session closing for a reason unrelated to the call itself
+	// (Server.Shutdown, an idle/pong timeout, being replaced) is also
+	// reported here rather than as MetricOutboundCallFailed — this hook
+	// cannot distinguish the two cases from ctx.Err() alone.
 	MetricOutboundCallCanceled
 )
 
@@ -90,6 +97,17 @@ type MetricEvent struct {
 // the bounded number of concurrent dispatches (maxConcurrentMetricDispatch)
 // is exhausted and further events are silently dropped rather than queued
 // or blocked.
+//
+// The context passed to Record is always context.Background(), never a
+// request- or session-scoped context: every MetricEvent can be produced at a
+// point where the natural originating context (an inbound handler's context,
+// an outbound Call's context, or the session's own context) is already
+// canceled — most obviously for the very events that report a timeout,
+// cancellation, or shutdown — and propagating it would let a defensively
+// written Record implementation (one that no-ops when ctx.Err() != nil)
+// silently drop exactly those events. A future tracing integration that
+// needs span correlation will need its own mechanism rather than relying on
+// this ctx.
 type Metrics interface {
 	Record(context.Context, MetricEvent)
 }
@@ -101,7 +119,14 @@ func (f MetricsFunc) Record(ctx context.Context, event MetricEvent) { f(ctx, eve
 // maxConcurrentMetricDispatch bounds how many Metrics.Record calls may be
 // in flight at once across an entire Server. It exists only to cap goroutine
 // growth if an application's Metrics implementation hangs or is persistently
-// slow; healthy implementations never approach it.
+// slow; healthy implementations never approach it. This budget is shared by
+// every session on the Server rather than allocated per session: if enough
+// sessions simultaneously accumulate hung (not panicking, merely never
+// returning) Record calls to exhaust it, event dispatch for unrelated,
+// healthy sessions starts silently dropping too. A hung (as opposed to slow)
+// Record implementation is already a bug in the application; this is a
+// last-resort ceiling on its blast radius, not a per-session fairness
+// guarantee.
 const maxConcurrentMetricDispatch = 1024
 
 // recordMetric is the only dispatch path to Session.metrics. It is used both
@@ -110,8 +135,11 @@ const maxConcurrentMetricDispatch = 1024
 // the caller: dispatch happens on a separate goroutine, bounded by
 // s.metricSlots, so a slow or hung Metrics implementation cannot delay
 // handler completion (and the handlerSlots it occupies) or Call's prompt
-// return on context cancellation.
-func (s *Session) recordMetric(ctx context.Context, event MetricEvent) {
+// return on context cancellation. It always calls Record with
+// context.Background() (see the Metrics doc comment for why), so it takes
+// no context.Context parameter itself — there is nothing meaningful for a
+// caller to supply.
+func (s *Session) recordMetric(event MetricEvent) {
 	if s.metrics == nil {
 		return
 	}
@@ -127,6 +155,6 @@ func (s *Session) recordMetric(ctx context.Context, event MetricEvent) {
 		defer func() { <-s.metricSlots }()
 		// A diagnostic hook must not be able to take down the protocol server.
 		defer func() { _ = recover() }()
-		s.metrics.Record(ctx, event)
+		s.metrics.Record(context.Background(), event)
 	}()
 }

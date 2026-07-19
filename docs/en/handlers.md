@@ -38,8 +38,8 @@ return confirmation, &csms.CallError{
 ```
 
 OCPP 2.1 SEND is registered with `csms.HandleSend`. Since SEND has no
-protocol response, validation or handler errors can only be observed
-through the logger.
+protocol response, validation or handler errors can only be observed through
+`csms.Logger` and `csms.Metrics` (`MetricSendDropped`).
 
 Router middleware wraps handlers in registration order; when multiple
 profiles share a Router, middleware must check the version it receives.

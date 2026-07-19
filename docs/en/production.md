@@ -50,7 +50,14 @@ processing or an outbound `csms.Call`'s cancellation responsiveness. In
 exchange, `Record` must be safe for concurrent use and carries no ordering
 guarantee; if concurrent dispatches exceed a fixed internal bound, further
 events are dropped rather than queued (a healthy implementation never
-reaches that bound).
+reaches that bound). `Record` always receives `context.Background()`: the
+events that report a timeout, cancellation, or shutdown are produced exactly
+when the original context may already be canceled, so propagating it would
+let a Metrics implementation that defensively no-ops when `ctx.Err() != nil`
+silently drop those events. Configuring `Config.Metrics` adds roughly +6% to
+an inbound CALL round trip and +13% to an outbound `csms.Call` round trip
+(no overhead if left unset; see the benchmark table in the root
+[README](../../README.en.md) for measured numbers).
 
 `Server.Snapshot()` and `Server.Healthy()` expose the active session count,
 per-session status, and shutdown state. The library does not impose an HTTP

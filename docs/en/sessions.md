@@ -40,6 +40,14 @@ background work.
 sessions and handlers to finish. It is safe to call repeatedly, but a
 shut-down Server cannot be reused.
 
+`Server.Snapshot()` returns a `ServerSnapshot` with the active session count,
+each session's `SessionInfo`, and whether the server is shutting down.
+`Server.Healthy()` is a simple bool that turns `false` as soon as `Shutdown`
+is called. Neither imposes an HTTP endpoint — wire them into whatever
+health/readiness route your application needs.
+
 Runnable code is available in
-[`examples/duplicate-session`](../../examples/duplicate-session) and
-[`examples/graceful-shutdown`](../../examples/graceful-shutdown).
+[`examples/duplicate-session`](../../examples/duplicate-session),
+[`examples/graceful-shutdown`](../../examples/graceful-shutdown), and
+[`examples/metrics-hook`](../../examples/metrics-hook) (a status endpoint
+example).

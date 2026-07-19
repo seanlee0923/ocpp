@@ -37,5 +37,11 @@ injected via `Config.UniqueIDGenerator`. A panic, an empty value, or a value
 longer than 36 characters returns `ErrUniqueIDGeneration`; an in-flight
 duplicate within the same session returns `ErrDuplicateUniqueID`.
 
+If `Config.Metrics` is set, every stage of `Call` (sent, completed, a remote
+error or undecodable response, timed out, canceled, or rejected because
+`MaxPendingCalls` was reached) is observed as a `MetricOutboundCallSent`/
+`Completed`/`Failed`/`Timeout`/`Canceled`/`Rejected` event. See "Observability
+and sensitive data" in [Production configuration](production.md) for details.
+
 A flow that calls Reset on a real session after BootNotification is in
 [`examples/outbound-call`](../../examples/outbound-call).

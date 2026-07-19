@@ -56,7 +56,7 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 	response, err := session.registerCall(id)
 	if err != nil {
 		if errors.Is(err, ErrTooManyPendingCalls) {
-			session.recordMetric(ctx, MetricEvent{
+			session.recordMetric(MetricEvent{
 				Type: MetricOutboundCallRejected, Identity: session.identity, Version: session.version,
 				MessageType: protocol.CallType, Action: request.ActionName(),
 			})
@@ -72,10 +72,14 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 	// finish records a terminal outcome for this call. Duration always
 	// measures from just after registerCall admitted the call into the
 	// pending-call table (so it includes CALL marshal/write time), not
-	// strictly from MetricOutboundCallSent.
-	finish := func(ctx context.Context, eventType MetricEventType) {
+	// strictly from MetricOutboundCallSent. It always dispatches with
+	// context.Background(), never ctx/callCtx: both may already be done by
+	// the time any branch below runs, and a Metrics implementation that
+	// defensively no-ops on an already-canceled ctx must not silently lose
+	// these events.
+	finish := func(eventType MetricEventType) {
 		metric.Type, metric.Duration = eventType, time.Since(start)
-		session.recordMetric(ctx, metric)
+		session.recordMetric(metric)
 	}
 
 	callCtx := ctx
@@ -85,15 +89,13 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 	}
 	defer cancel()
 	if err := session.send(callCtx, protocol.Call{ID: id, Action: request.ActionName(), Payload: payload}); err != nil {
-		// context.Background(): this event reports why the call ended, and
-		// callCtx (or even ctx itself) may already be done here, so a
-		// Metrics implementation that defensively no-ops on an
-		// already-canceled ctx must not silently lose it.
-		finish(context.Background(), classifyContextOutcome(callCtx.Err()))
+		finish(classifyContextOutcome(callCtx.Err()))
 		return zero, err
 	}
-	metric.Type = MetricOutboundCallSent
-	session.recordMetric(ctx, metric)
+	session.recordMetric(MetricEvent{
+		Type: MetricOutboundCallSent, Identity: session.identity, Version: session.version,
+		MessageType: protocol.CallType, Action: request.ActionName(),
+	})
 
 	select {
 	case outcome := <-response:
@@ -102,24 +104,24 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 			if errors.As(outcome.err, &remoteErr) {
 				metric.ErrorCode = remoteErr.Code
 			}
-			finish(ctx, MetricOutboundCallFailed)
+			finish(MetricOutboundCallFailed)
 			return zero, outcome.err
 		}
 		if err := zero.ValidateJSON(outcome.result.Payload); err != nil {
-			finish(ctx, MetricOutboundCallFailed)
+			finish(MetricOutboundCallFailed)
 			return zero, fmt.Errorf("invalid %s confirmation from Charging Station: %w", request.ActionName(), err)
 		}
 		if err := json.Unmarshal(outcome.result.Payload, &zero); err != nil {
-			finish(ctx, MetricOutboundCallFailed)
+			finish(MetricOutboundCallFailed)
 			return zero, fmt.Errorf("decode %s confirmation: %w", request.ActionName(), err)
 		}
-		finish(ctx, MetricOutboundCallCompleted)
+		finish(MetricOutboundCallCompleted)
 		return zero, nil
 	case <-callCtx.Done():
-		finish(context.Background(), classifyContextOutcome(callCtx.Err()))
+		finish(classifyContextOutcome(callCtx.Err()))
 		return zero, callCtx.Err()
 	case <-session.Done():
-		finish(context.Background(), MetricOutboundCallFailed)
+		finish(MetricOutboundCallFailed)
 		if err := session.Err(); err != nil {
 			return zero, err
 		}

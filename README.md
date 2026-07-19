@@ -491,12 +491,20 @@ GOCACHE=/tmp/ocpp-go-build-cache go test -run '^$' -bench . -benchmem ./...
 | `RouterLookup`, 미들웨어 0개 | 15.5 ns | 0 B | 0 |
 | `RouterLookup`, 미들웨어 5개 | 113.6 ns | 128 B | 6 |
 | `InboundCallRoundTrip` (실제 WebSocket loopback 전체 왕복) | 30.4 µs | 5.7 KB | 82 |
+| `InboundCallRoundTrip`, `Config.Metrics` 설정 | +6% | +225 B | +2 |
+| `OutboundCallRoundTrip` (`csms.Call` 실제 왕복) | 기준치 | 12.9 KB | 202 |
+| `OutboundCallRoundTrip`, `Config.Metrics` 설정 | +13% | +224 B | +2 |
 
 CALL 하나를 실제 네트워크까지 왕복시켜도 30µs대이므로, OCPP처럼 충전기 한 대가
 몇 분에 한 번 메시지를 보내는 저빈도 프로토콜에서는 처리량이 병목이 될 가능성이
 낮습니다. 배열이 큰 payload(예: `NotifyPeriodicEventStream`)를 아주 많은 세션이
 동시에 보내는 배포에서는 `ValidateJSONLarge`/`ValidateThenUnmarshalLarge` 수치를
 참고하세요.
+
+`Config.Metrics`를 설정하면(이벤트마다 별도 goroutine으로 dispatch) inbound CALL
+왕복은 약 +6%, outbound `csms.Call` 왕복은 약 +13%(둘 다 이벤트당 +2 alloc) 늘어난다.
+같은 실행에서 측정한 상대값 기준이며, `Config.Metrics`를 설정하지 않으면(대다수
+배포) 이 오버헤드는 전혀 발생하지 않는다.
 
 ## 구조화 로그
 

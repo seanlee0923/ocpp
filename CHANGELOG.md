@@ -19,6 +19,12 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   dispatch되어 느리거나 멈춘 구현체도 handler 처리나 outbound `csms.Call`의
   취소 응답성을 지연시키지 않는다(대신 `Record`는 동시 호출 안전성이 필요하고
   순서를 보장하지 않으며, 동시 dispatch 상한 초과 시 이벤트가 드롭된다).
+  `Record`에는 항상 `context.Background()`가 전달된다 — 원래 컨텍스트를
+  전달하면 timeout/cancel/shutdown을 보고하는 이벤트가 정확히 그 컨텍스트가
+  이미 취소된 상태라, `ctx.Err() != nil`이면 아무 것도 안 하는 방어적
+  `Record` 구현체가 그 이벤트들을 조용히 놓치게 되기 때문이다. `Config.Metrics`를
+  설정하면 inbound CALL 왕복은 약 +6%, outbound `csms.Call` 왕복은 약 +13%
+  오버헤드가 생긴다(설정하지 않으면 오버헤드 없음, 실측 벤치마크는 README 참고).
 - `Server.Snapshot()`/`ServerSnapshot`과 `Server.Healthy()` — 활성 세션 수,
   세션별 상태, shutdown 여부를 조회하는 서버 상태 API. HTTP endpoint 형식은
   강제하지 않는다.

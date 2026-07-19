@@ -522,6 +522,9 @@ Reference numbers below (Apple M2, local run; actual results vary by hardware).
 | `RouterLookup`, 0 middleware | 15.5 ns | 0 B | 0 |
 | `RouterLookup`, 5 middleware | 113.6 ns | 128 B | 6 |
 | `InboundCallRoundTrip` (full WebSocket loopback round trip) | 30.4 µs | 5.7 KB | 82 |
+| `InboundCallRoundTrip`, with `Config.Metrics` set | +6% | +225 B | +2 |
+| `OutboundCallRoundTrip` (`csms.Call` full round trip) | baseline | 12.9 KB | 202 |
+| `OutboundCallRoundTrip`, with `Config.Metrics` set | +13% | +224 B | +2 |
 
 Even a full round trip over a real network stays in the tens of
 microseconds, so throughput is unlikely to be a bottleneck for OCPP, where a
@@ -529,6 +532,12 @@ single Charging Station sends a message every few minutes at most. For
 deployments where many sessions send large-array payloads (such as
 `NotifyPeriodicEventStream`) concurrently, see the
 `ValidateJSONLarge`/`ValidateThenUnmarshalLarge` numbers.
+
+Configuring `Config.Metrics` (which dispatches each event on its own
+goroutine) adds roughly +6% to an inbound CALL round trip and +13% to an
+outbound `csms.Call` round trip (+2 allocs per event in both cases). These
+are relative numbers measured in the same run; deployments that leave
+`Config.Metrics` unset (the common case) pay none of this overhead.
 
 ## Structured logging
 

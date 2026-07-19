@@ -36,5 +36,11 @@ OnDuplicateSession: func(ctx context.Context, attempt csms.DuplicateSessionAttem
 `Server.Shutdown(ctx)`은 새 연결을 거부하고 활성 세션과 handler가 끝날 때까지 기다린다.
 반복 호출은 안전하지만 종료한 Server는 재사용할 수 없다.
 
-실행 가능한 코드는 [`examples/duplicate-session`](../examples/duplicate-session)과
-[`examples/graceful-shutdown`](../examples/graceful-shutdown)을 참고한다.
+`Server.Snapshot()`은 활성 세션 수, 각 세션의 `SessionInfo`와 shutdown 여부를 담은
+`ServerSnapshot`을 반환한다. `Server.Healthy()`는 `Shutdown`이 호출된 순간부터 `false`를
+반환하는 단순 bool이다. 둘 다 HTTP endpoint를 강제하지 않으므로 health/readiness probe
+경로는 애플리케이션이 직접 연결한다.
+
+실행 가능한 코드는 [`examples/duplicate-session`](../examples/duplicate-session),
+[`examples/graceful-shutdown`](../examples/graceful-shutdown)과
+[`examples/metrics-hook`](../examples/metrics-hook)(상태 endpoint 예시)를 참고한다.

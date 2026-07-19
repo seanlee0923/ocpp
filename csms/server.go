@@ -289,7 +289,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// outbound csms.Call from within OnConnect, which is a documented
 	// supported pattern), and Connected must be observable first.
 	s.log(session.Context(), sessionLogRecord(session, LogInfo, LogSessionConnected))
-	session.recordMetric(session.Context(), MetricEvent{
+	// context.Background(): a concurrent Server.Shutdown could in principle
+	// cancel session.Context() in the narrow window between
+	// activateReservation and here, and this event must not be silently
+	// dropped by a Metrics implementation that defensively no-ops on an
+	// already-canceled ctx (see the same reasoning in call.go's finish).
+	session.recordMetric(MetricEvent{
 		Type: MetricSessionConnected, Identity: session.identity, Version: session.version,
 	})
 	conn.SetReadLimit(s.config.ReadLimit)
@@ -312,7 +317,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	record := sessionLogRecord(session, LogInfo, LogSessionDisconnected)
 	record.Reason = disconnectReason(err)
 	s.log(context.Background(), record)
-	session.recordMetric(context.Background(), MetricEvent{
+	session.recordMetric(MetricEvent{
 		Type: MetricSessionDisconnected, Identity: session.identity, Version: session.version,
 		Duration: time.Since(session.connectedAt),
 	})
@@ -577,18 +582,18 @@ func (s *Server) handleSend(ctx context.Context, session *Session, send protocol
 			record.Level, record.Event, record.Reason = LogError, LogSendDropped, "handler_panic"
 			s.log(ctx, record)
 			metric.Type, metric.Duration = MetricSendDropped, time.Since(start)
-			session.recordMetric(ctx, metric)
+			session.recordMetric(metric)
 		}
 	}()
 	s.log(ctx, record)
 	metric.Type = MetricSendReceived
-	session.recordMetric(ctx, metric)
+	session.recordMetric(metric)
 	handler, ok := s.config.Router.lookup(session.version, send.Action)
 	if !ok {
 		record.Level, record.Event, record.Reason = LogWarn, LogSendDropped, "action_not_registered"
 		s.log(ctx, record)
 		metric.Type, metric.Duration = MetricSendDropped, time.Since(start)
-		session.recordMetric(ctx, metric)
+		session.recordMetric(metric)
 		return
 	}
 	// OCPP 2.1 SEND is unconfirmed. Handler and validation failures are
@@ -597,13 +602,13 @@ func (s *Server) handleSend(ctx context.Context, session *Session, send protocol
 		record.Level, record.Event, record.Reason = LogWarn, LogSendDropped, "handler_or_validation_error"
 		s.log(ctx, record)
 		metric.Type, metric.Duration = MetricSendDropped, time.Since(start)
-		session.recordMetric(ctx, metric)
+		session.recordMetric(metric)
 		return
 	}
 	record.Level, record.Event, record.Reason = LogDebug, LogSendCompleted, ""
 	s.log(ctx, record)
 	metric.Type, metric.Duration = MetricSendCompleted, time.Since(start)
-	session.recordMetric(ctx, metric)
+	session.recordMetric(metric)
 }
 
 func (s *Server) handleCall(ctx context.Context, session *Session, call protocol.Call) {
@@ -616,7 +621,7 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 			record.Level, record.Event, record.ErrorCode, record.Reason = LogError, LogCallRejected, InternalError, "handler_panic"
 			s.log(ctx, record)
 			metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), InternalError
-			session.recordMetric(ctx, metric)
+			session.recordMetric(metric)
 			_ = session.send(ctx, protocol.CallError{
 				ID: call.ID, Code: string(InternalError), Description: "internal error", Details: json.RawMessage(`{}`),
 			})
@@ -624,13 +629,13 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 	}()
 	s.log(ctx, record)
 	metric.Type = MetricCallReceived
-	session.recordMetric(ctx, metric)
+	session.recordMetric(metric)
 	handler, ok := s.config.Router.lookup(session.version, call.Action)
 	if !ok {
 		record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, NotImplemented, "action_not_registered"
 		s.log(ctx, record)
 		metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), NotImplemented
-		session.recordMetric(ctx, metric)
+		session.recordMetric(metric)
 		_ = session.send(ctx, protocol.CallError{ID: call.ID, Code: string(NotImplemented), Description: "action is not registered"})
 		return
 	}
@@ -640,13 +645,13 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 			record.Level, record.Event, record.ErrorCode, record.Reason = LogError, LogCallRejected, InternalError, "response_write_failed"
 			s.log(ctx, record)
 			metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), InternalError
-			session.recordMetric(ctx, metric)
+			session.recordMetric(metric)
 			return
 		}
 		record.Level, record.Event = LogDebug, LogCallCompleted
 		s.log(ctx, record)
 		metric.Type, metric.Duration = MetricCallCompleted, time.Since(start)
-		session.recordMetric(ctx, metric)
+		session.recordMetric(metric)
 		return
 	}
 	callError := &CallError{Code: InternalError, Description: "internal error", Details: map[string]any{}}
@@ -668,7 +673,7 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 	record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, callError.Code, "handler_error"
 	s.log(ctx, record)
 	metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), callError.Code
-	session.recordMetric(ctx, metric)
+	session.recordMetric(metric)
 	_ = session.send(ctx, protocol.CallError{ID: call.ID, Code: string(callError.Code), Description: callError.Description, Details: raw})
 }
 

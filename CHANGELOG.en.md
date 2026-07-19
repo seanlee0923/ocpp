@@ -21,7 +21,13 @@ the same major version.
   implementation never delays handler processing or an outbound
   `csms.Call`'s cancellation responsiveness (in exchange, `Record` must be
   concurrency-safe, is not strictly ordered, and events are dropped past a
-  fixed concurrent-dispatch bound).
+  fixed concurrent-dispatch bound). `Record` always receives
+  `context.Background()` — propagating the originating context would let a
+  Metrics implementation that defensively no-ops on an already-canceled ctx
+  silently drop exactly the events that report a timeout, cancellation, or
+  shutdown. Configuring `Config.Metrics` adds roughly +6% to an inbound CALL
+  round trip and +13% to an outbound `csms.Call` round trip (no overhead if
+  left unset; see README for measured benchmarks).
 - `Server.Snapshot()`/`ServerSnapshot` and `Server.Healthy()` — a server
   status API exposing active session count, per-session status, and
   shutdown state. No HTTP endpoint shape is imposed.
