@@ -174,6 +174,14 @@ JSON Schema를 기준으로 생성했습니다. 생성 후 원본 JSON과 생성
 각 파일은 공식 ZIP과 byte 단위로 일치함을 확인했습니다. OCPP와 원본 Schema의
 저작권 및 라이선스는 Open Charge Alliance에 있습니다.
 
+checksum만으로는 원본 스키마가 변조되지 않았다는 것만 확인할 수 있을 뿐, 그
+스키마로부터 생성된 Go 코드가 실제로 스키마를 충실히 반영하는지는 증명하지
+못합니다. 이 부분을 직접 확인하고 싶다면
+[seanlee0923/ocpp-schema-gen](https://github.com/seanlee0923/ocpp-schema-gen)을
+참고하세요 — 위 세 버전 전체 365개 생성 파일을 처음부터 재생성해서 이
+저장소의 `v16`/`v201`/`v21` 파일과 byte 단위로 동일함을 독립적으로 재현할 수
+있는 별도의 생성기입니다.
+
 ## Typed inbound handler
 
 공식 OCPP Profile 외의 Action도 공통 typed API로 등록할 수 있습니다.

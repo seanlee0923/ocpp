@@ -182,6 +182,14 @@ At generation time there were 56 OCPP 1.6 files, 128 OCPP 2.0.1 files, and
 ZIP contents. Copyright and licensing of OCPP and the original schemas
 belong to the Open Charge Alliance.
 
+A checksum only proves the source schema wasn't tampered with — it doesn't
+prove the Go code generated from it actually reflects that schema
+faithfully. To verify that part yourself, see
+[seanlee0923/ocpp-schema-gen](https://github.com/seanlee0923/ocpp-schema-gen),
+an independent generator that reproduces all 365 generated files across the
+three versions above from scratch and lets you diff them byte-for-byte
+against this repository's `v16`/`v201`/`v21` files.
+
 ## Typed inbound handlers
 
 Actions outside the official OCPP Profiles can also be registered through
