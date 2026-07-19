@@ -38,6 +38,13 @@ the same major version.
   identity-scoped labels are safe depends on deployment size, a call the
   library cannot make correctly for every user. The example deliberately
   excludes `identity` from its labels.
+- Added the [`examples/otel-hook`](examples/otel-hook) example. OpenTelemetry
+  tracing also needs no dedicated hook: verified that `csms.Router`
+  middleware (inbound) and the caller's own `ctx` (outbound `csms.Call`) are
+  enough, including confirming end-to-end that an inbound handler span and
+  an outbound `Call` span started inside it form a correct parent-child
+  relationship. Unlike `MetricEvent.Identity`, a span attribute does not
+  create a persistent time series per value, so attaching identity is safe.
 
 ### Fixed
 

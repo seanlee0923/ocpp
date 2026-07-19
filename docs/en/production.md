@@ -74,8 +74,12 @@ for a small depot, dangerous for a large public network) — so no official
 Prometheus adapter package is provided. Use `Identity` for filtering or
 branching logic instead of passing it through as a label.
 
-An opt-in OpenTelemetry tracing hook is not available yet (see the Roadmap
-in the root [README](../../README.en.md)).
+OpenTelemetry tracing has no dedicated hook either — `csms.Router` middleware
+can hand handlers a new `ctx`, so inbound tracing is just middleware, and
+outbound `csms.Call` needs nothing more than the caller starting its own span
+and passing that `ctx` in. Unlike `MetricEvent.Identity`, a span attribute
+does not create a persistent time series per value, so attaching identity as
+an attribute is fine.
 
 [`examples/structured-logger`](../../examples/structured-logger) shows
 wiring up the standard `log/slog`,
@@ -83,7 +87,10 @@ wiring up the standard `log/slog`,
 metrics counter with a status endpoint,
 [`examples/prometheus-hook`](../../examples/prometheus-hook) shows wiring
 Prometheus counters/histograms directly, with no official adapter, using
-cardinality-safe labels, and
+cardinality-safe labels,
+[`examples/otel-hook`](../../examples/otel-hook) shows wiring OpenTelemetry
+spans with no dedicated tracing hook, using middleware and the caller's own
+`ctx`, and
 [`examples/graceful-shutdown`](../../examples/graceful-shutdown) shows
 signal-based shutdown.
 

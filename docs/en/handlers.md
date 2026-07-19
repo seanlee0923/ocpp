@@ -43,3 +43,6 @@ protocol response, validation or handler errors can only be observed through
 
 Router middleware wraps handlers in registration order; when multiple
 profiles share a Router, middleware must check the version it receives.
+Middleware can construct a new `ctx` and pass it to the next handler, so
+tracing (e.g. OpenTelemetry) can be wired up as middleware with no dedicated
+hook needed — see [`examples/otel-hook`](../../examples/otel-hook).

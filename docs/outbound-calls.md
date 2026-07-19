@@ -37,5 +37,9 @@ timeout, 취소, `MaxPendingCalls` 초과 거부)가 `MetricOutboundCallSent`/`C
 `Failed`/`Timeout`/`Canceled`/`Rejected` 이벤트로 관측된다. 자세한 내용은
 [운영 환경 구성](production.md)의 "관측과 민감 정보"를 참고한다.
 
+`Call`을 부르는 쪽이 이미 `ctx`를 직접 넘기므로, OpenTelemetry tracing도 호출자가
+`Call` 전에 자기 span을 만들어 그 `ctx`로 부르기만 하면 된다 — 라이브러리 쪽 지원이
+따로 필요 없다. [`examples/otel-hook`](../examples/otel-hook)이 이 패턴을 보여준다.
+
 BootNotification 이후 실제 session으로 Reset을 호출하는 흐름은
 [`examples/outbound-call`](../examples/outbound-call)에 있다.

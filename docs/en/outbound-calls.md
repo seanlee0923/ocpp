@@ -43,5 +43,10 @@ error or undecodable response, timed out, canceled, or rejected because
 `Completed`/`Failed`/`Timeout`/`Canceled`/`Rejected` event. See "Observability
 and sensitive data" in [Production configuration](production.md) for details.
 
+Since the caller already supplies `ctx` to `Call`, OpenTelemetry tracing
+needs no library support either: start your own span before calling `Call`
+and pass its `ctx` in. [`examples/otel-hook`](../../examples/otel-hook) shows
+this pattern.
+
 A flow that calls Reset on a real session after BootNotification is in
 [`examples/outbound-call`](../../examples/outbound-call).

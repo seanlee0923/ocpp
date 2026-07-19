@@ -15,6 +15,8 @@
 - `metrics-hook`: in-process Metrics 카운터와 Snapshot/Healthy 상태 endpoint
 - `prometheus-hook`: `csms.Metrics`를 Prometheus counter/histogram으로 직접 연결
   (공식 adapter 없음, cardinality-safe label 예시)
+- `otel-hook`: `csms.Router` middleware만으로 OpenTelemetry span 연결(inbound)과
+  호출자 ctx로 outbound span 연결(`csms.Call`), 전용 tracing 훅 없이 동작
 - `graceful-shutdown`: signal 기반 세션 및 HTTP 종료
 
 ```sh

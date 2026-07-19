@@ -35,6 +35,12 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   label로 쓰는 게 안전한지는 배포 규모마다 다른 판단이라 라이브러리가 대신
   정할 수 없음). 예제는 `identity`를 label에서 제외하는 안전한 패턴을
   보여준다.
+- [`examples/otel-hook`](examples/otel-hook) 예제를 추가했다 — OpenTelemetry
+  tracing도 전용 훅 없이 기존 `csms.Router` middleware(inbound)와 호출자가
+  직접 넘기는 `ctx`(outbound `csms.Call`)만으로 span 연결이 가능함을 실제로
+  확인(inbound handler span과 그 안에서 실행한 outbound `Call` span이 부모-자식
+  관계로 정확히 이어지는 것까지 검증)했다. `MetricEvent.Identity`와 달리 span
+  attribute는 값마다 time series를 만들지 않아 identity를 붙여도 안전하다.
 
 ### Fixed
 
