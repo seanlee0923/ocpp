@@ -550,11 +550,15 @@ func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 		case <-conn.closed:
 			return
 		}
-		defer func() { <-s.handlerSlots }()
+		// Recover before releasing the slot: a single closure makes that
+		// order explicit in the code instead of relying on two separate
+		// defers' LIFO registration order, which would silently keep
+		// working even if someone later reordered the two statements.
 		defer func() {
 			if recover() != nil {
 				_ = conn.send(protocol.CallError{ID: call.ID, Code: "InternalError", Description: "internal error", Details: json.RawMessage(`{}`)})
 			}
+			<-s.handlerSlots
 		}()
 		payload, err := handler(conn.ctx, call.Payload)
 		if err != nil {
