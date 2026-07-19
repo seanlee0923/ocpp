@@ -384,7 +384,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	s.sessionsMu.RUnlock()
 	for _, session := range sessions {
-		go session.closeWithError(ErrServerShutdown)
+		go func() { _ = session.closeWithError(ErrServerShutdown) }()
 	}
 	for _, session := range sessions {
 		select {
@@ -713,11 +713,6 @@ func disconnectReason(err error) string {
 	default:
 		return "connection_error"
 	}
-}
-
-func hasSupportedSubprotocol(r *http.Request, supported []protocol.Version) bool {
-	_, ok := negotiatedVersion(r, supported)
-	return ok
 }
 
 func negotiatedVersion(r *http.Request, supported []protocol.Version) (protocol.Version, bool) {

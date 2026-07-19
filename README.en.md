@@ -5,7 +5,6 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/seanlee0923/ocpp.svg)](https://pkg.go.dev/github.com/seanlee0923/ocpp)
 [![CI](https://github.com/seanlee0923/ocpp/actions/workflows/ci.yml/badge.svg)](https://github.com/seanlee0923/ocpp/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/seanlee0923/ocpp/branch/main/graph/badge.svg)](https://codecov.io/gh/seanlee0923/ocpp)
-[![Go Report Card](https://goreportcard.com/badge/github.com/seanlee0923/ocpp)](https://goreportcard.com/report/github.com/seanlee0923/ocpp)
 
 A Go library providing an OCPP-J CSMS WebSocket server. It handles OCPP 1.6,
 2.0.1, and 2.1 on a single transport layer, with message types generated from
@@ -488,14 +487,18 @@ sent by a Charging Station is returned as `*csms.RemoteCallError`, whose
 GOCACHE=/tmp/ocpp-go-build-cache go vet ./...
 GOCACHE=/tmp/ocpp-go-build-cache go test ./...
 GOCACHE=/tmp/ocpp-go-build-cache go test -race ./...
+golangci-lint run ./...
 ```
 
 WebSocket integration tests use a local loopback port.
 
-Real, cross-package execution coverage (including the 365 generated types,
-same basis CI/Codecov use) is measured with the following. As of 2026-07-19
-it's 66.5%; hand-written core packages such as `csms`/`internal` are
-individually in the 80%s.
+Real, cross-package execution coverage (including the 365 generated types) is
+measured with the following. As of 2026-07-19 it's 66.5%; hand-written core
+packages such as `csms`/`internal` are individually in the 80%s. The 365
+generated types (`v16`/`v201`/`v21`, marked `DO NOT EDIT`) and `examples/`
+have essentially no branching logic or aren't meant to be tested, which drags
+the local number down, so the Codecov badge reports a number computed with
+those paths excluded via `codecov.yml`.
 
 ```sh
 GOCACHE=/tmp/ocpp-go-build-cache go test -coverpkg=./... -coverprofile=coverage.out ./...

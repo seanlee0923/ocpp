@@ -45,11 +45,18 @@ the same major version.
   an outbound `Call` span started inside it form a correct parent-child
   relationship. Unlike `MetricEvent.Identity`, a span attribute does not
   create a persistent time series per value, so attaching identity is safe.
-- Added GoDoc, CI, Codecov, and Go Report Card badges to the README. CI now
-  measures coverage with
-  `go test -coverpkg=./... -coverprofile=coverage.out ./...` and uploads it
-  to Codecov (`fail_ci_if_error: false`, so CI itself doesn't fail before the
-  Codecov account is connected).
+- Added GoDoc, CI, and Codecov badges to the README. CI now measures coverage
+  with `go test -coverpkg=./... -coverprofile=coverage.out ./...` and uploads
+  it to Codecov (`fail_ci_if_error: false`, so CI itself doesn't fail before
+  the Codecov account is connected). `codecov.yml` excludes the 365 generated
+  types (`v16`/`v201`/`v21`) and `examples/` from the reported coverage, so
+  the badge reflects real logic coverage rather than being dragged down by
+  generated code and non-tested example programs.
+- Added a `lint` job to CI (`golangci-lint`, default linter set). Go Report
+  Card was sunset as a service on 2026-07-01 (an external event, not
+  repo-specific), so its README badge was removed and replaced with
+  golangci-lint. `defer conn.Close()`-style patterns in test files are
+  excluded from `errcheck` via `.golangci.yml`.
 
 ### Fixed
 
@@ -63,6 +70,10 @@ the same major version.
   `MetricOutboundCallCanceled` instead of `MetricOutboundCallFailed`.
 - Remote CALLERROR error-code extraction now uses `errors.As` instead of a
   raw type assertion, so it stays correct if the error is ever wrapped.
+- Removed an unused function (`hasSupportedSubprotocol`) surfaced while
+  adopting `golangci-lint`, and split an unintentionally identical `||`
+  condition in `TestIPRateLimiter` into two separate assertions (the
+  behavior itself was already correct).
 
 ## [0.1.0] - 2026-07-18
 

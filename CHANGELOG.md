@@ -41,10 +41,16 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   확인(inbound handler span과 그 안에서 실행한 outbound `Call` span이 부모-자식
   관계로 정확히 이어지는 것까지 검증)했다. `MetricEvent.Identity`와 달리 span
   attribute는 값마다 time series를 만들지 않아 identity를 붙여도 안전하다.
-- README에 GoDoc, CI, Codecov, Go Report Card 배지를 추가했다. CI가
+- README에 GoDoc, CI, Codecov 배지를 추가했다. CI가
   `go test -coverpkg=./... -coverprofile=coverage.out ./...`로 커버리지를
   측정해 Codecov에 업로드한다(`fail_ci_if_error: false`라 Codecov 계정
-  연결 전에도 CI 자체는 실패하지 않는다).
+  연결 전에도 CI 자체는 실패하지 않는다). `codecov.yml`에서 생성 타입
+  365개(`v16`/`v201`/`v21`)와 `examples/`를 커버리지 집계에서 제외해,
+  배지가 실제 로직 커버리지에 가까운 값을 보여주도록 했다.
+- CI에 `lint` job(`golangci-lint`, 기본 linter set)을 추가했다. Go Report
+  Card는 2026-07-01부로 서비스 자체가 sunset되어(외부 요인) README 배지를
+  제거하고 golangci-lint로 대체했다. 테스트 파일의 `defer conn.Close()`류는
+  `.golangci.yml`에서 errcheck 예외 처리했다.
 
 ### Fixed
 
@@ -57,6 +63,9 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   `MetricOutboundCallCanceled`로 정확히 분류하도록 수정했다.
 - 원격 CALLERROR의 error code 추출에 raw 타입 단언 대신 `errors.As`를 사용하도록
   변경해, 향후 에러가 wrapping되어도 안전하게 동작하도록 했다.
+- `golangci-lint` 도입 과정에서 드러난 사용하지 않는 함수(`hasSupportedSubprotocol`)를
+  제거하고, `TestIPRateLimiter`의 의도치 않게 동일했던 `||` 조건식을 두 개의
+  개별 assertion으로 분리했다(동작 자체는 원래도 올바랐음).
 
 ## [0.1.0] - 2026-07-18
 

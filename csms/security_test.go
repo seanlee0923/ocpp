@@ -207,8 +207,11 @@ func TestIPRateLimiter(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempt := HandshakeAttempt{RemoteAddr: "192.0.2.1:1234"}
-	if !limiter.Allow(context.Background(), attempt) || !limiter.Allow(context.Background(), attempt) {
-		t.Fatal("allowed attempts were rejected")
+	if !limiter.Allow(context.Background(), attempt) {
+		t.Fatal("first attempt was rejected")
+	}
+	if !limiter.Allow(context.Background(), attempt) {
+		t.Fatal("second attempt was rejected")
 	}
 	if limiter.Allow(context.Background(), attempt) {
 		t.Fatal("rate limit was not enforced")

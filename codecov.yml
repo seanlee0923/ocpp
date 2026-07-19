@@ -1,0 +1,15 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+
+ignore:
+  - "v16/**"
+  - "v201/**"
+  - "v21/**"
+  - "examples/**"
