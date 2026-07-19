@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/seanlee0923/ocpp/internal/stationtest"
 	"github.com/seanlee0923/ocpp/protocol"
 	"github.com/seanlee0923/ocpp/v16"
 )
@@ -66,23 +67,23 @@ func TestCallRoundTripUsesConfiguredUniqueID(t *testing.T) {
 func TestCallReturnsRemoteCallError(t *testing.T) {
 	connected := make(chan *Session, 1)
 	server, err := New(Config{
-		Versions:          []protocol.Version{protocol.OCPP16},
-		UniqueIDGenerator: func() string { return "rejected-call" },
-		OnConnect:         func(session *Session) { connected <- session },
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *Session) { connected <- session },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
-	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
-	defer conn.Close()
+	station := stationtest.Dial(t, httpServer.URL, "CP-001", protocol.OCPP16)
+	if station == nil {
+		return
+	}
+	handleReset(t, station, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		return v16.ResetConfirmation{}, &stationtest.CallError{Code: "NotSupported", Description: "cannot reset"}
+	})
 	session := <-connected
 
-	go func() {
-		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`[4,"rejected-call","NotSupported","cannot reset",{"reason":"busy"}]`))
-	}()
 	_, err = Call[v16.ResetRequest, v16.ResetConfirmation](
 		context.Background(), session, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
 	)
@@ -103,8 +104,14 @@ func TestCallHonorsContextTimeout(t *testing.T) {
 	}
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
-	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
-	defer conn.Close()
+	station := stationtest.Dial(t, httpServer.URL, "CP-001", protocol.OCPP16)
+	if station == nil {
+		return
+	}
+	handleReset(t, station, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		time.Sleep(200 * time.Millisecond)
+		return v16.ResetConfirmation{Status: v16.ResetConfirmationStatusAccepted}, nil
+	})
 	session := <-connected
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
@@ -131,13 +138,19 @@ func TestCallConvertsUniqueIDGeneratorPanicToError(t *testing.T) {
 	}
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
-	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
-	defer conn.Close()
+	stationtest.Dial(t, httpServer.URL, "CP-001", protocol.OCPP16)
 	_, err = Call[v16.ResetRequest, v16.ResetConfirmation](
 		context.Background(), <-connected, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
 	)
 	if !errors.Is(err, ErrUniqueIDGeneration) {
 		t.Fatalf("error = %v, want ErrUniqueIDGeneration", err)
+	}
+}
+
+func handleReset(t *testing.T, station *stationtest.Station, handler func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error)) {
+	t.Helper()
+	if err := stationtest.Handle(station, handler); err != nil {
+		t.Fatal(err)
 	}
 }
 
