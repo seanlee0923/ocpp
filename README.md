@@ -567,7 +567,10 @@ mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 
 ## 로드맵
 
-- opt-in Prometheus adapter와 OpenTelemetry tracing hook
+- opt-in OpenTelemetry tracing hook (Prometheus는 공식 adapter 없이
+  [`examples/prometheus-hook`](examples/prometheus-hook) 연동 예제로 제공 —
+  충전기 identity를 label로 쓰는 게 안전한지는 배포 규모에 따라 다른
+  판단이라 라이브러리가 대신 정하지 않기로 했다)
 - 유료 OCA OCTT와 공식 인증은 release 이후 선택적으로 수행
 - Charging Station 클라이언트
 

@@ -605,7 +605,11 @@ together with a status endpoint.
 
 ## Roadmap
 
-- Opt-in Prometheus adapter and OpenTelemetry tracing hook
+- Opt-in OpenTelemetry tracing hook (Prometheus is covered by the
+  [`examples/prometheus-hook`](examples/prometheus-hook) wiring example
+  instead of an official adapter package — whether it's safe to label
+  metrics by charging station identity depends on deployment size, a call
+  the library deliberately leaves to the application)
 - Paid OCA OCTT and official certification are optional, post-release steps
 - Charging Station client
 

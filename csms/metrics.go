@@ -73,9 +73,25 @@ const (
 // MetricEvent describes one measurable protocol event. Unlike LogRecord, it
 // is not meant for human-readable diagnostics: it carries Duration for
 // latency observation and has no free-form reason text, so implementations
-// can use Type/Action/ErrorCode directly as low-cardinality metric labels.
+// can use Type/Action/Version/ErrorCode directly as low-cardinality metric
+// labels. Identity is deliberately not in that list — see its own comment.
 type MetricEvent struct {
-	Type        MetricEventType
+	Type MetricEventType
+	// Identity is the charging station's identity string. It is NOT safe to
+	// use directly as a label in a cardinality-sensitive metrics backend
+	// (for example a Prometheus label) in a large deployment: every
+	// distinct Identity creates a new time series, and a fleet of
+	// thousands of charging stations produces thousands of series per
+	// metric — a well-known Prometheus operational failure mode. This is a
+	// deployment-scale judgment call the library cannot make correctly for
+	// every user (fine for a 10-charger depot, wrong for a 50,000-charger
+	// public network), so it is left entirely to the Metrics
+	// implementation: use Identity for filtering/branching logic (e.g.
+	// route a subset of chargers to more detailed stats) rather than
+	// passing it straight through as a label, unless your deployment is
+	// small enough that per-charger series are acceptable. See
+	// examples/prometheus-hook for a wiring example that deliberately
+	// excludes Identity from its labels.
 	Identity    string
 	Version     protocol.Version
 	MessageType protocol.MessageTypeID

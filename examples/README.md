@@ -13,6 +13,8 @@
 - `mtls`: Security Profile 3 mutual TLS
 - `structured-logger`: `log/slog` JSON logger 연결
 - `metrics-hook`: in-process Metrics 카운터와 Snapshot/Healthy 상태 endpoint
+- `prometheus-hook`: `csms.Metrics`를 Prometheus counter/histogram으로 직접 연결
+  (공식 adapter 없음, cardinality-safe label 예시)
 - `graceful-shutdown`: signal 기반 세션 및 HTTP 종료
 
 ```sh

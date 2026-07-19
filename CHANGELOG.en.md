@@ -32,6 +32,12 @@ the same major version.
   status API exposing active session count, per-session status, and
   shutdown state. No HTTP endpoint shape is imposed.
 - Added the [`examples/metrics-hook`](examples/metrics-hook) example.
+- Documented the cardinality risk of `MetricEvent.Identity` in its doc
+  comment and added the [`examples/prometheus-hook`](examples/prometheus-hook)
+  example. No official Prometheus adapter package is shipped — whether
+  identity-scoped labels are safe depends on deployment size, a call the
+  library cannot make correctly for every user. The example deliberately
+  excludes `identity` from its labels.
 
 ### Fixed
 

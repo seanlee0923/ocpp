@@ -64,13 +64,26 @@ per-session status, and shutdown state. The library does not impose an HTTP
 endpoint shape — define whatever path and payload your health/readiness
 probes need.
 
-An opt-in Prometheus adapter and OpenTelemetry tracing hook are not
-available yet (see the Roadmap in the root [README](../../README.en.md)).
+Do not use `MetricEvent.Identity` (the charging station identity) directly
+as a label. In a deployment with thousands or tens of thousands of charging
+stations, every distinct identity creates a new time series, which is a
+well-known operational failure mode for cardinality-sensitive backends like
+Prometheus. Whether identity-scoped labels are safe depends on deployment
+size — a judgment call the library cannot make correctly for every user (fine
+for a small depot, dangerous for a large public network) — so no official
+Prometheus adapter package is provided. Use `Identity` for filtering or
+branching logic instead of passing it through as a label.
+
+An opt-in OpenTelemetry tracing hook is not available yet (see the Roadmap
+in the root [README](../../README.en.md)).
 
 [`examples/structured-logger`](../../examples/structured-logger) shows
 wiring up the standard `log/slog`,
 [`examples/metrics-hook`](../../examples/metrics-hook) shows an in-process
-metrics counter with a status endpoint, and
+metrics counter with a status endpoint,
+[`examples/prometheus-hook`](../../examples/prometheus-hook) shows wiring
+Prometheus counters/histograms directly, with no official adapter, using
+cardinality-safe labels, and
 [`examples/graceful-shutdown`](../../examples/graceful-shutdown) shows
 signal-based shutdown.
 

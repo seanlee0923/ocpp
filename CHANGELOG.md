@@ -29,6 +29,12 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   세션별 상태, shutdown 여부를 조회하는 서버 상태 API. HTTP endpoint 형식은
   강제하지 않는다.
 - [`examples/metrics-hook`](examples/metrics-hook) 예제 추가.
+- `MetricEvent.Identity`에 cardinality 위험 경고를 doc comment로 명시하고,
+  [`examples/prometheus-hook`](examples/prometheus-hook) 예제를 추가했다 —
+  공식 Prometheus adapter 패키지는 만들지 않기로 했다(충전기 identity를
+  label로 쓰는 게 안전한지는 배포 규모마다 다른 판단이라 라이브러리가 대신
+  정할 수 없음). 예제는 `identity`를 label에서 제외하는 안전한 패턴을
+  보여준다.
 
 ### Fixed
 
