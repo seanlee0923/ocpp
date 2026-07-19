@@ -24,6 +24,7 @@ The module path is `github.com/seanlee0923/ocpp`.
 - Security Profile 0, 1, 2, 3 handshake policies
 - Ping/Pong, idle timeout, graceful shutdown, handler backpressure
 - Default unique ID generator with support for injecting a custom one
+- `station` package: a typed Charging Station client with reconnect/backoff
 
 ## Requirements
 
@@ -43,8 +44,9 @@ Main dependency:
 | Shared WebSocket transport | Done | Done | Done |
 | Core Profile API | Done | Done | Done |
 
-The current priority is the CSMS server. A Charging Station client will be
-added once the server API has stabilized.
+The CSMS server was the priority and its API has now stabilized. A
+Charging Station client is also available via the `station` package — see
+"Charging Station client" below.
 
 ## Quick start
 
@@ -621,10 +623,36 @@ mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 [`examples/metrics-hook`](examples/metrics-hook) shows an in-process counter
 together with a status endpoint.
 
+## Charging Station client
+
+The `station` package is a real OCPP-J Charging Station client with
+reconnect/backoff. It offers typed outbound `station.Call` and typed inbound
+`station.Handle` over the same generated v16/v201/v21 types, the same way
+`csms.Call`/`csms.Handle` do on the server side.
+
+```go
+st, err := station.New(station.Config{
+    URL: "wss://csms.example.com", Identity: "STATION-01", Version: protocol.OCPP16,
+    ReconnectPolicy: &station.ReconnectPolicy{InitialDelay: time.Second, MaxDelay: 30 * time.Second, Multiplier: 2},
+})
+go st.Run(ctx) // reconnects automatically per ReconnectPolicy on disconnect
+
+confirmation, err := station.Call[v16.BootNotificationRequest, v16.BootNotificationConfirmation](
+    ctx, st, v16.BootNotificationRequest{ChargePointVendor: "Acme", ChargePointModel: "X1"},
+)
+```
+
+Handlers registered via `station.Handle` survive reconnects. A pending Call
+on a connection that drops fails immediately (no offline queueing). Basic
+Auth/TLS (including mTLS) are configured via `Config.BasicAuth`/
+`Config.TLSConfig`. Running many chargers is the caller's responsibility —
+keep your own `map[string]*station.Station`; this package only owns
+protocol/session mechanics. See
+[`examples/station-client`](examples/station-client).
+
 ## Roadmap
 
 - Paid OCA OCTT and official certification are optional, post-release steps
-- Charging Station client
 
 Prometheus and OpenTelemetry turned out not to need a dedicated hook — the
 existing `csms.Metrics` and `csms.Router` middleware/caller-supplied `ctx`

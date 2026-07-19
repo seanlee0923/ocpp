@@ -18,6 +18,8 @@
 - `otel-hook`: `csms.Router` middleware만으로 OpenTelemetry span 연결(inbound)과
   호출자 ctx로 outbound span 연결(`csms.Call`), 전용 tracing 훅 없이 동작
 - `graceful-shutdown`: signal 기반 세션 및 HTTP 종료
+- `station-client`: `station` 패키지로 만든 재연결 가능한 Charging Station
+  클라이언트 — BootNotification/Heartbeat 전송과 inbound Reset 처리
 
 ```sh
 go run ./examples/ocpp201-csms

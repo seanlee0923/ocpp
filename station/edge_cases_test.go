@@ -1,0 +1,256 @@
+package station_test
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/seanlee0923/ocpp/csms"
+	"github.com/seanlee0923/ocpp/protocol"
+	"github.com/seanlee0923/ocpp/station"
+	"github.com/seanlee0923/ocpp/v16"
+)
+
+func TestNewRejectsInvalidConfig(t *testing.T) {
+	base := station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16}
+
+	cases := map[string]func(station.Config) station.Config{
+		"empty URL":                      func(c station.Config) station.Config { c.URL = ""; return c },
+		"empty identity":                 func(c station.Config) station.Config { c.Identity = ""; return c },
+		"empty version":                  func(c station.Config) station.Config { c.Version = ""; return c },
+		"negative CallTimeout":           func(c station.Config) station.Config { c.CallTimeout = -time.Second; return c },
+		"negative MaxPendingCalls":       func(c station.Config) station.Config { c.MaxPendingCalls = -1; return c },
+		"negative MaxConcurrentHandlers": func(c station.Config) station.Config { c.MaxConcurrentHandlers = -1; return c },
+		"negative HandshakeTimeout":      func(c station.Config) station.Config { c.HandshakeTimeout = -time.Second; return c },
+		"negative reconnect delay": func(c station.Config) station.Config {
+			c.ReconnectPolicy = &station.ReconnectPolicy{InitialDelay: -time.Second}
+			return c
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			config := mutate(base)
+			if _, err := station.New(config); err == nil {
+				t.Fatalf("New(%+v) succeeded, want an error", config)
+			}
+		})
+	}
+
+	if _, err := station.New(base); err != nil {
+		t.Fatalf("New with a valid config failed: %v", err)
+	}
+}
+
+func TestStationCallHonorsContextTimeout(t *testing.T) {
+	router := csms.NewRouter()
+	block := make(chan struct{})
+	defer close(block)
+	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *csms.Session, json.RawMessage) (any, error) {
+		<-block
+		return map[string]any{"currentTime": "2026-07-19T00:00:00Z"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st := dialStation(t, httpServer.URL, "CP-001", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err = station.Call[v16.HeartbeatRequest, v16.HeartbeatConfirmation](ctx, st, v16.HeartbeatRequest{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context deadline exceeded", err)
+	}
+}
+
+func TestStationOutboundPendingCallLimit(t *testing.T) {
+	const pendingLimit = 4
+
+	router := csms.NewRouter()
+	block := make(chan struct{})
+	var inFlight atomic.Int64
+	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *csms.Session, json.RawMessage) (any, error) {
+		inFlight.Add(1)
+		<-block
+		return map[string]any{"currentTime": "2026-07-19T00:00:00Z"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st, err := station.New(station.Config{
+		URL: wsURL(httpServer.URL), Identity: "CP-001", Version: protocol.OCPP16, MaxPendingCalls: pendingLimit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runInBackground(t, st)
+	waitConnected(t, st)
+
+	results := make(chan error, pendingLimit)
+	for range pendingLimit {
+		go func() {
+			_, err := station.Call[v16.HeartbeatRequest, v16.HeartbeatConfirmation](ctx, st, v16.HeartbeatRequest{})
+			results <- err
+		}()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for inFlight.Load() != pendingLimit && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := inFlight.Load(); got != pendingLimit {
+		t.Fatalf("in-flight Heartbeats = %d, want %d", got, pendingLimit)
+	}
+
+	if _, err := station.Call[v16.HeartbeatRequest, v16.HeartbeatConfirmation](ctx, st, v16.HeartbeatRequest{}); !errors.Is(err, station.ErrTooManyPendingCalls) {
+		t.Fatalf("overflow error = %v, want ErrTooManyPendingCalls", err)
+	}
+
+	close(block)
+	for range pendingLimit {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestStationStop(t *testing.T) {
+	server, err := csms.New(csms.Config{Versions: []protocol.Version{protocol.OCPP16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st, err := station.New(station.Config{URL: wsURL(httpServer.URL), Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- st.Run(context.Background()) }()
+	waitConnected(t, st)
+
+	st.Stop()
+	select {
+	case err := <-runDone:
+		if !errors.Is(err, station.ErrStopped) {
+			t.Fatalf("Run after Stop = %v, want ErrStopped", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after Stop")
+	}
+	if st.State() != station.Disconnected {
+		t.Fatalf("state after Stop = %v, want Disconnected", st.State())
+	}
+	if _, err := station.Call[v16.HeartbeatRequest, v16.HeartbeatConfirmation](context.Background(), st, v16.HeartbeatRequest{}); !errors.Is(err, station.ErrNotConnected) {
+		t.Fatalf("Call after Stop = %v, want ErrNotConnected", err)
+	}
+
+	// Stop is safe to call again, and safe to call before Run ever ran.
+	st.Stop()
+	unstarted, err := station.New(station.Config{URL: wsURL(httpServer.URL), Identity: "CP-002", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unstarted.Stop()
+}
+
+func TestStationPendingCallFailsOnReconnect(t *testing.T) {
+	connected := make(chan *csms.Session, 2)
+	router := csms.NewRouter()
+	block := make(chan struct{})
+	defer close(block)
+	var inFlight atomic.Int64
+	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *csms.Session, json.RawMessage) (any, error) {
+		inFlight.Add(1)
+		<-block
+		return map[string]any{"currentTime": "2026-07-19T00:00:00Z"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := csms.New(csms.Config{
+		Router: router, Versions: []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st := dialStation(t, httpServer.URL, "CP-001", nil)
+	session := <-connected
+
+	callErr := make(chan error, 1)
+	go func() {
+		_, err := station.Call[v16.HeartbeatRequest, v16.HeartbeatConfirmation](context.Background(), st, v16.HeartbeatRequest{})
+		callErr <- err
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for inFlight.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if inFlight.Load() == 0 {
+		t.Fatal("Heartbeat never reached the CSMS handler")
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-callErr:
+		if err == nil {
+			t.Fatal("Call succeeded after the underlying connection was closed, want an error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending Call did not fail promptly after disconnect")
+	}
+}
+
+func TestStationTLS(t *testing.T) {
+	server, err := csms.New(csms.Config{Versions: []protocol.Version{protocol.OCPP16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewTLSServer(server)
+	defer httpServer.Close()
+
+	st, err := station.New(station.Config{
+		URL:       "wss" + strings.TrimPrefix(httpServer.URL, "https"),
+		Identity:  "CP-001",
+		Version:   protocol.OCPP16,
+		TLSConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test-only, httptest.NewTLSServer's cert is self-signed
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	waitConnected(t, st)
+}
+
+func waitConnected(t *testing.T, st *station.Station) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for st.State() != station.Connected && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if st.State() != station.Connected {
+		t.Fatal("station did not connect")
+	}
+}

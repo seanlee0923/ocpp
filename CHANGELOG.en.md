@@ -57,6 +57,17 @@ the same major version.
   repo-specific), so its README badge was removed and replaced with
   golangci-lint. `defer conn.Close()`-style patterns in test files are
   excluded from `errcheck` via `.golangci.yml`.
+- `station` package — a real OCPP-J Charging Station client with
+  reconnect/backoff. Offers typed outbound `station.Call` and typed inbound
+  `station.Handle` over the same generated v16/v201/v21 types, the same way
+  `csms.Call`/`csms.Handle` do. Handlers registered via `station.Handle`
+  survive reconnects; a pending Call on a connection that drops fails
+  immediately (no offline queueing). Basic Auth/TLS (including mTLS) are
+  configured via `Config.BasicAuth`/`Config.TLSConfig`. Running many
+  chargers is the caller's responsibility (keep your own
+  `map[string]*station.Station`) — this package only owns protocol/session
+  mechanics. Added the [`examples/station-client`](examples/station-client)
+  example.
 
 ### Fixed
 

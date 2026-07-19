@@ -51,6 +51,15 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   Card는 2026-07-01부로 서비스 자체가 sunset되어(외부 요인) README 배지를
   제거하고 golangci-lint로 대체했다. 테스트 파일의 `defer conn.Close()`류는
   `.golangci.yml`에서 errcheck 예외 처리했다.
+- `station` 패키지 — 재연결/backoff을 갖춘 실제 OCPP-J Charging Station
+  클라이언트. `csms.Call`/`csms.Handle`과 동일한 방식으로 생성된
+  v16/v201/v21 타입에 대한 typed outbound `station.Call`과 typed inbound
+  `station.Handle`을 제공한다. `station.Handle`로 등록한 핸들러는 재연결
+  이후에도 유지되며, 연결이 끊긴 pending Call은 즉시 실패 처리된다(오프라인
+  큐잉 없음). Basic Auth/TLS(mTLS 포함)는 `Config.BasicAuth`/
+  `Config.TLSConfig`로 설정한다. 여러 charger 운영은 호출자 책임(자체
+  `map[string]*station.Station` 관리) — 이 패키지는 프로토콜/세션 동작만
+  다룬다. [`examples/station-client`](examples/station-client) 예제 추가.
 
 ### Fixed
 
