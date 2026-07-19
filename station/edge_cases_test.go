@@ -48,26 +48,13 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 }
 
 func TestStationCallHonorsContextTimeout(t *testing.T) {
-	router := csms.NewRouter()
-	block := make(chan struct{})
+	httpServer, block, _ := newBlockingHeartbeatServer(t, nil)
 	defer close(block)
-	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *csms.Session, json.RawMessage) (any, error) {
-		<-block
-		return map[string]any{"currentTime": "2026-07-19T00:00:00Z"}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpServer := httptest.NewServer(server)
-	defer httpServer.Close()
 
 	st := dialStation(t, httpServer.URL, "CP-001", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	_, err = station.Call[v16.HeartbeatRequest, v16.HeartbeatConfirmation](ctx, st, v16.HeartbeatRequest{})
+	_, err := station.Call[v16.HeartbeatRequest, v16.HeartbeatConfirmation](ctx, st, v16.HeartbeatRequest{})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("error = %v, want context deadline exceeded", err)
 	}
@@ -76,22 +63,7 @@ func TestStationCallHonorsContextTimeout(t *testing.T) {
 func TestStationOutboundPendingCallLimit(t *testing.T) {
 	const pendingLimit = 4
 
-	router := csms.NewRouter()
-	block := make(chan struct{})
-	var inFlight atomic.Int64
-	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *csms.Session, json.RawMessage) (any, error) {
-		inFlight.Add(1)
-		<-block
-		return map[string]any{"currentTime": "2026-07-19T00:00:00Z"}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpServer := httptest.NewServer(server)
-	defer httpServer.Close()
+	httpServer, block, inFlight := newBlockingHeartbeatServer(t, nil)
 
 	st, err := station.New(station.Config{
 		URL: wsURL(httpServer.URL), Identity: "CP-001", Version: protocol.OCPP16, MaxPendingCalls: pendingLimit,
@@ -172,26 +144,8 @@ func TestStationStop(t *testing.T) {
 
 func TestStationPendingCallFailsOnReconnect(t *testing.T) {
 	connected := make(chan *csms.Session, 2)
-	router := csms.NewRouter()
-	block := make(chan struct{})
+	httpServer, block, inFlight := newBlockingHeartbeatServer(t, func(session *csms.Session) { connected <- session })
 	defer close(block)
-	var inFlight atomic.Int64
-	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *csms.Session, json.RawMessage) (any, error) {
-		inFlight.Add(1)
-		<-block
-		return map[string]any{"currentTime": "2026-07-19T00:00:00Z"}, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	server, err := csms.New(csms.Config{
-		Router: router, Versions: []protocol.Version{protocol.OCPP16},
-		OnConnect: func(session *csms.Session) { connected <- session },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpServer := httptest.NewServer(server)
-	defer httpServer.Close()
 
 	st := dialStation(t, httpServer.URL, "CP-001", nil)
 	session := <-connected
@@ -221,6 +175,31 @@ func TestStationPendingCallFailsOnReconnect(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("pending Call did not fail promptly after disconnect")
 	}
+}
+
+// newBlockingHeartbeatServer starts a CSMS whose Heartbeat handler blocks
+// until block is closed, incrementing inFlight for each Heartbeat currently
+// blocked — shared by tests that need a Call to stay pending on the CSMS
+// side. onConnect, if non-nil, is passed through to csms.Config.OnConnect.
+func newBlockingHeartbeatServer(t *testing.T, onConnect func(*csms.Session)) (httpServer *httptest.Server, block chan struct{}, inFlight *atomic.Int64) {
+	t.Helper()
+	router := csms.NewRouter()
+	block = make(chan struct{})
+	inFlight = new(atomic.Int64)
+	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *csms.Session, json.RawMessage) (any, error) {
+		inFlight.Add(1)
+		<-block
+		return map[string]any{"currentTime": "2026-07-19T00:00:00Z"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}, OnConnect: onConnect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer = httptest.NewServer(server)
+	t.Cleanup(httpServer.Close)
+	return httpServer, block, inFlight
 }
 
 func TestStationTLS(t *testing.T) {
