@@ -441,6 +441,30 @@ func (s *Station) setConn(conn *stationConn) {
 	s.connMu.Unlock()
 }
 
+// callOnConnect isolates a panicking OnConnect from the rest of Run's loop.
+// Without this, a panic here has nowhere to be recovered (Run is typically
+// launched by the caller as `go st.Run(ctx)`, and recover only works within
+// the panicking goroutine's own call stack) and crashes the whole process,
+// not just this Station — worse than merely leaving state stuck at
+// Connected, since setState(Connected) above has already run and nothing
+// downstream would otherwise get a chance to correct it.
+func (s *Station) callOnConnect() {
+	if s.config.OnConnect == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	s.config.OnConnect(s)
+}
+
+// callOnDisconnect mirrors callOnConnect for the disconnect hook.
+func (s *Station) callOnDisconnect(cause error) {
+	if s.config.OnDisconnect == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	s.config.OnDisconnect(s, cause)
+}
+
 // Run dials and, if config.ReconnectPolicy is set, keeps reconnecting with
 // backoff until ctx is canceled or Stop is called. It blocks; run it in its
 // own goroutine, one per Station. Returns ctx.Err(), ErrStopped, or the
@@ -462,17 +486,13 @@ func (s *Station) Run(ctx context.Context) error {
 			attempt = 0
 			s.setConn(conn)
 			s.setState(Connected)
-			if s.config.OnConnect != nil {
-				s.config.OnConnect(s)
-			}
+			s.callOnConnect()
 
 			attemptErr = s.runConnection(ctx, conn)
 			conn.close(attemptErr)
 			s.setConn(nil)
 			s.setState(Disconnected)
-			if s.config.OnDisconnect != nil {
-				s.config.OnDisconnect(s, attemptErr)
-			}
+			s.callOnDisconnect(attemptErr)
 
 			if stopped, err := s.stoppedOrDone(ctx); stopped {
 				return err

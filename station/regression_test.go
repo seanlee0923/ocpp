@@ -57,6 +57,56 @@ func TestStationHandlerPanicIsRecovered(t *testing.T) {
 	}
 }
 
+// TestStationOnConnectPanicDoesNotCrashStation proves a panicking OnConnect
+// callback doesn't take Run down (an unrecovered panic in the goroutine
+// running Run would crash the whole process, not just this Station, since
+// Run is typically launched as `go st.Run(ctx)` with no recover of its
+// own) and doesn't leave State() stuck at Connected forever: Run must
+// still reach runConnection, notice the CSMS closing the connection,
+// transition to Disconnected, and call OnDisconnect.
+func TestStationOnConnectPanicDoesNotCrashStation(t *testing.T) {
+	connected := make(chan *csms.Session, 1)
+	server, err := csms.New(csms.Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	disconnected := make(chan struct{}, 1)
+	st, err := station.New(station.Config{
+		URL: wsURL(httpServer.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		OnConnect:    func(*station.Station) { panic("boom") },
+		OnDisconnect: func(*station.Station, error) { disconnected <- struct{}{} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	waitConnected(t, st)
+
+	session := <-connected
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		t.Fatal("OnDisconnect was not called after OnConnect panicked")
+	}
+	deadline := time.Now().Add(time.Second)
+	for st.State() == station.Connected && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if st.State() == station.Connected {
+		t.Fatalf("state stuck at %v after OnConnect panicked and the CSMS closed the connection", st.State())
+	}
+}
+
 // TestStationHandlerErrorDoesNotLeakDetails proves a plain (non-*CallError)
 // handler error never reaches the CSMS as-is: only a fixed "internal
 // error" description crosses the wire, matching how csms's handleCall
