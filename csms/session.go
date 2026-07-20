@@ -281,7 +281,19 @@ func (s *Session) startHandler(run func(context.Context)) bool {
 	go func() {
 		defer s.handlerWG.Done()
 		defer func() { <-s.handlerSlots }()
-		run(s.ctx)
+		// A per-call bound, not just s.ctx directly: s.ctx is only
+		// canceled when the whole session ends, so without this a
+		// handler that never returns permanently occupies its
+		// handlerSlots slot (starving every later CALL/SEND once
+		// MaxConcurrentHandlers is exhausted) and never gives a
+		// well-behaved handler any way to notice it should stop.
+		ctx := s.ctx
+		if s.callTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(s.ctx, s.callTimeout)
+			defer cancel()
+		}
+		run(ctx)
 	}()
 	return true
 }
