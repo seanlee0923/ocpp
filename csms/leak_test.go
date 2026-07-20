@@ -28,8 +28,7 @@ func TestRepeatedDisconnectReleasesSessionsAndGoroutines(t *testing.T) {
 	}
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
-	runtime.GC()
-	baseline := runtime.NumGoroutine()
+	baseline := settledGoroutineCount(t)
 
 	const cycles = 100
 	for cycle := 0; cycle < cycles; cycle++ {
@@ -156,8 +155,7 @@ func waitForNoSession(t *testing.T, server *Server, identity string) {
 // leaks metricDispatchWorkers goroutines per Server, even though Shutdown
 // is documented as terminal.
 func TestShutdownStopsMetricDispatchWorkers(t *testing.T) {
-	runtime.GC()
-	baseline := runtime.NumGoroutine()
+	baseline := settledGoroutineCount(t)
 
 	server, err := New(Config{
 		Versions: []protocol.Version{protocol.OCPP16},
@@ -210,6 +208,37 @@ func TestShutdownReturnsCtxErrIfMetricWorkersDoNotExit(t *testing.T) {
 	if err := server.Shutdown(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Shutdown error = %v, want context.DeadlineExceeded", err)
 	}
+}
+
+// settledGoroutineCount waits for runtime.NumGoroutine() to stop changing
+// before returning it, instead of taking a single snapshot right after
+// runtime.GC(). Earlier tests in this package's binary leave goroutines
+// (websocket close handshakes, ping/idle timers) that exit asynchronously;
+// a single-snapshot baseline can catch a few of them mid-exit, and later
+// exact-threshold comparisons against that inflated baseline become flaky
+// once those stragglers actually finish. This was slow enough to reproduce
+// on GitHub Actions Linux runners but never locally, matching the same
+// "CI environment differs from local" class of flakiness documented for
+// TestStationCallWriteHonorsContextTimeout.
+func settledGoroutineCount(t *testing.T) int {
+	t.Helper()
+	var last, stable int
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		current := runtime.NumGoroutine()
+		if current == last {
+			stable++
+			if stable >= 3 {
+				return current
+			}
+		} else {
+			stable = 0
+		}
+		last = current
+		time.Sleep(10 * time.Millisecond)
+	}
+	return last
 }
 
 func waitForGoroutineBudget(t *testing.T, baseline, allowance int) {
