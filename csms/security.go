@@ -96,6 +96,15 @@ func NewIPRateLimiter(limit int, window time.Duration) (*IPRateLimiter, error) {
 	return &IPRateLimiter{limit: limit, window: window, clients: make(map[string]ipRateLimitWindow)}, nil
 }
 
+// maxRateLimiterClients hard-caps how many distinct remote hosts
+// IPRateLimiter tracks at once. Without a hard cap, an attacker making one
+// handshake attempt per distinct source IP (e.g. from a large subnet) can
+// grow limiter.clients without bound: the old cleanup only removed entries
+// whose window had already elapsed, and every entry from an ongoing,
+// rotating-IP attack is by definition still within its window — this is
+// the server's own rate limiter becoming an unbounded-memory DoS vector.
+const maxRateLimiterClients = 1024
+
 func (limiter *IPRateLimiter) Allow(_ context.Context, attempt HandshakeAttempt) bool {
 	host, _, err := net.SplitHostPort(attempt.RemoteAddr)
 	if err != nil {
@@ -104,20 +113,36 @@ func (limiter *IPRateLimiter) Allow(_ context.Context, attempt HandshakeAttempt)
 	now := time.Now()
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
-	entry := limiter.clients[host]
+	entry, tracked := limiter.clients[host]
 	if entry.reset.IsZero() || !now.Before(entry.reset) {
 		entry = ipRateLimitWindow{reset: now.Add(limiter.window)}
 	}
 	entry.count++
+	if !tracked && len(limiter.clients) >= maxRateLimiterClients {
+		limiter.evictOne(now)
+	}
 	limiter.clients[host] = entry
-	if len(limiter.clients) > 1024 {
-		for client, candidate := range limiter.clients {
-			if !now.Before(candidate.reset) {
-				delete(limiter.clients, client)
-			}
+	return entry.count <= limiter.limit
+}
+
+// evictOne makes room for a new client once limiter.clients is at capacity:
+// it deletes the first already-expired entry it finds, or, if none of the
+// tracked entries have expired yet, the one closest to expiring.
+func (limiter *IPRateLimiter) evictOne(now time.Time) {
+	var oldestHost string
+	var oldestReset time.Time
+	for host, candidate := range limiter.clients {
+		if !now.Before(candidate.reset) {
+			delete(limiter.clients, host)
+			return
+		}
+		if oldestHost == "" || candidate.reset.Before(oldestReset) {
+			oldestHost, oldestReset = host, candidate.reset
 		}
 	}
-	return entry.count <= limiter.limit
+	if oldestHost != "" {
+		delete(limiter.clients, oldestHost)
+	}
 }
 
 type SecurityEventType string
