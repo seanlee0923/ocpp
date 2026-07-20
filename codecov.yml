@@ -13,3 +13,7 @@ ignore:
   - "v201/**"
   - "v21/**"
   - "examples/**"
+  # internal/stationtest has no test files of its own — it's a test double
+  # exercised entirely by csms's own tests, so Go's default per-package
+  # coverage reports it as 0% even though it's well covered cross-package.
+  - "internal/stationtest/**"
