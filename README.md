@@ -526,7 +526,7 @@ CALL 하나를 실제 네트워크까지 왕복시켜도 30µs대이므로, OCPP
 동시에 보내는 배포에서는 `ValidateJSONLarge`/`ValidateThenUnmarshalLarge` 수치를
 참고하세요.
 
-`Config.Metrics`를 설정하면(이벤트마다 별도 goroutine으로 dispatch) inbound CALL
+`Config.Metrics`를 설정하면(고정 워커 풀로 dispatch) inbound CALL
 왕복은 약 +6%, outbound `csms.Call` 왕복은 약 +13%(둘 다 이벤트당 +2 alloc) 늘어난다.
 같은 실행에서 측정한 상대값 기준이며, `Config.Metrics`를 설정하지 않으면(대다수
 배포) 이 오버헤드는 전혀 발생하지 않는다.
@@ -568,12 +568,12 @@ server, err := csms.New(csms.Config{
 outbound `csms.Call`은 전송 성공(`MetricOutboundCallSent`)과 최종 결과(완료/실패/
 timeout/취소/`MaxPendingCalls` 초과 거부)를 구분해서 관측할 수 있습니다.
 
-`Metrics.Record`는 이벤트마다 별도 goroutine에서 dispatch되어 호출자를 절대 블로킹하지
-않습니다. 느리거나 멈춘 `Record` 구현체가 handler 처리나 outbound `csms.Call`의 취소
-응답성을 지연시키지 않는다는 뜻입니다. 대신 `Record`는 동시 호출에 안전해야 하며, 이벤트
-발생 순서를 보장하지 않습니다. 동시 dispatch 상한(내부적으로 고정된 개수)을 초과하면
-초과분 이벤트는 대기하지 않고 버려집니다 — 정상적인 `Record` 구현체라면 이 상한에 도달할
-일이 없습니다.
+`Metrics.Record`는 `Server` 하나당 고정된 개수의 워커 goroutine이 공유 큐를 소비하며
+dispatch되어 호출자를 절대 블로킹하지 않습니다. 느리거나 멈춘 `Record` 구현체가 handler
+처리나 outbound `csms.Call`의 취소 응답성을 지연시키지 않는다는 뜻입니다. 대신 `Record`는
+동시 호출에 안전해야 하며, 이벤트 발생 순서를 보장하지 않습니다. 큐가 가득 차면(내부적으로
+고정된 용량) 초과분 이벤트는 대기하지 않고 버려집니다 — 정상적인 `Record` 구현체라면 이
+상한에 도달할 일이 없습니다. `Server.Shutdown`을 호출하면 이 워커들도 함께 정지합니다.
 
 서버 상태는 `Server.Snapshot()`과 `Server.Healthy()`로 조회합니다. 라이브러리는 HTTP
 endpoint를 강제하지 않으므로 애플리케이션이 원하는 경로에 직접 연결합니다.

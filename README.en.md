@@ -561,11 +561,12 @@ deployments where many sessions send large-array payloads (such as
 `NotifyPeriodicEventStream`) concurrently, see the
 `ValidateJSONLarge`/`ValidateThenUnmarshalLarge` numbers.
 
-Configuring `Config.Metrics` (which dispatches each event on its own
-goroutine) adds roughly +6% to an inbound CALL round trip and +13% to an
-outbound `csms.Call` round trip (+2 allocs per event in both cases). These
-are relative numbers measured in the same run; deployments that leave
-`Config.Metrics` unset (the common case) pay none of this overhead.
+Configuring `Config.Metrics` (which dispatches events through a fixed pool
+of worker goroutines) adds roughly +6% to an inbound CALL round trip and
++13% to an outbound `csms.Call` round trip (+2 allocs per event in both
+cases). These are relative numbers measured in the same run; deployments
+that leave `Config.Metrics` unset (the common case) pay none of this
+overhead.
 
 ## Structured logging
 
@@ -607,13 +608,14 @@ protocol server. Outbound `csms.Call` distinguishes a successful send
 (`MetricOutboundCallSent`) from its final outcome — completed, failed, timed
 out, canceled, or rejected because `MaxPendingCalls` was reached.
 
-`Metrics.Record` is dispatched on its own goroutine per event, so it never
-blocks the caller — a slow or hung `Record` implementation cannot delay
-handler processing or an outbound `csms.Call`'s cancellation responsiveness.
-In exchange, `Record` must be safe for concurrent use and carries no
-ordering guarantee. If the number of concurrent dispatches exceeds a fixed
-internal bound, further events are dropped rather than queued — a healthy
-`Record` implementation never reaches that bound.
+`Metrics.Record` is dispatched by a fixed pool of worker goroutines per
+`Server`, shared through a queue, so it never blocks the caller — a slow or
+hung `Record` implementation cannot delay handler processing or an outbound
+`csms.Call`'s cancellation responsiveness. In exchange, `Record` must be
+safe for concurrent use and carries no ordering guarantee. Once the queue
+(a fixed internal capacity) is full, further events are dropped rather than
+queued — a healthy `Record` implementation never reaches that bound.
+`Server.Shutdown` stops these workers too.
 
 Server status is available via `Server.Snapshot()` and `Server.Healthy()`.
 The library does not impose an HTTP endpoint — wire them into whatever route
