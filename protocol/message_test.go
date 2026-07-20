@@ -87,3 +87,54 @@ func TestEncodeCallErrorUsesEmptyDetailsObject(t *testing.T) {
 		t.Fatalf("details = %s", fields[4])
 	}
 }
+
+// TestEncodeRejectsInvalidMessages exercises Encode's error-return branch
+// for each of the four Message types — unlike Decode's negative paths
+// (already covered by TestDecodeRejectsInvalidMessages), none of these
+// were exercised by any prior test.
+func TestEncodeRejectsInvalidMessages(t *testing.T) {
+	overlong := func(n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = 'a'
+		}
+		return string(b)
+	}
+	tests := []struct {
+		name    string
+		message Message
+	}{
+		{"Call empty ID", Call{ID: "", Action: "Reset", Payload: json.RawMessage(`{}`)}},
+		{"Call overlong action", Call{ID: "abc", Action: overlong(MaxActionLength + 1), Payload: json.RawMessage(`{}`)}},
+		{"Call non-object payload", Call{ID: "abc", Action: "Reset", Payload: json.RawMessage(`[1,2]`)}},
+		{"Send empty ID", Send{ID: "", Action: "NotifyPeriodicEventStream", Payload: json.RawMessage(`{}`)}},
+		{"Send non-object payload", Send{ID: "abc", Action: "NotifyPeriodicEventStream", Payload: json.RawMessage(`"x"`)}},
+		{"CallResult empty ID", CallResult{ID: "", Payload: json.RawMessage(`{}`)}},
+		{"CallResult non-object payload", CallResult{ID: "abc", Payload: json.RawMessage(`null`)}},
+		{"CallError empty ID", CallError{ID: "", Code: "NotImplemented", Description: "x"}},
+		{"CallError overlong code", CallError{ID: "abc", Code: overlong(MaxErrorCodeLength + 1), Description: "x"}},
+		{"CallError overlong description", CallError{ID: "abc", Code: "NotImplemented", Description: overlong(MaxErrorDescriptionLength + 1)}},
+		{"CallError non-object details", CallError{ID: "abc", Code: "NotImplemented", Description: "x", Details: json.RawMessage(`[1]`)}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := Encode(test.message); !errors.Is(err, ErrInvalidMessage) {
+				t.Errorf("Encode error = %v, want ErrInvalidMessage", err)
+			}
+		})
+	}
+}
+
+// unsupportedMessage is a Message implementation Encode has never seen,
+// exercising its default case.
+type unsupportedMessage struct{}
+
+func (unsupportedMessage) Type() MessageTypeID { return 0 }
+func (unsupportedMessage) UniqueID() string    { return "x" }
+func (unsupportedMessage) ocppMessage()        {}
+
+func TestEncodeRejectsUnsupportedMessageType(t *testing.T) {
+	if _, err := Encode(unsupportedMessage{}); err == nil {
+		t.Fatal("Encode did not reject an unsupported Message implementation")
+	}
+}
