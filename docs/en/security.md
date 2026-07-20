@@ -44,6 +44,13 @@ transport type for OCPP certificate Actions, but the CA, private keys,
 OCSP/CRL, and certificate lifecycle are the application infrastructure's
 responsibility.
 
+`Authenticator.Authenticate` and `HandshakeLimiter.Allow` run synchronously
+on the HTTP goroutine handling that one handshake, so a slow or hung
+implementation only stalls that single Charging Station's connection
+attempt rather than the whole server — but if it never returns, that
+goroutine and the pending upgrade leak for as long as the client keeps the
+underlying TCP connection open. Both should return promptly.
+
 Runnable configuration examples:
 
 - [Security Profile 1 Basic Auth](../../examples/basic-auth)
