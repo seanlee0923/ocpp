@@ -33,6 +33,9 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 	if session == nil {
 		return zero, fmt.Errorf("session is nil")
 	}
+	if isNilType(request) || isNilType(zero) {
+		return zero, fmt.Errorf("Call requires non-pointer generated request and confirmation payloads")
+	}
 	if request.Direction() != protocol.RequestPayload || zero.Direction() != protocol.ConfirmationPayload {
 		return zero, fmt.Errorf("Call requires a request followed by a confirmation")
 	}
