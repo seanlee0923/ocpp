@@ -22,6 +22,7 @@ import (
 )
 
 const defaultMaxConcurrentHandlers = 16
+const defaultWriteTimeout = 10 * time.Second
 
 var (
 	ErrNotConnected               = errors.New("station: not connected")
@@ -109,6 +110,15 @@ type Config struct {
 	// slot.
 	MaxQueuedHandlers int
 	HandshakeTimeout  time.Duration
+	// WriteTimeout bounds how long a single WebSocket write (an outbound
+	// Call's CALL frame, or an inbound CALL's CALLRESULT/CALLERROR
+	// response) may take, matching csms.Config.WriteTimeout. Default: 10s.
+	// Without this, a stalled write (e.g. the CSMS not reading) could block
+	// indefinitely regardless of any context deadline the caller passed to
+	// Call, since a context deadline alone does nothing to bound a
+	// blocking WriteMessage call — this is the actual socket-level
+	// deadline that does.
+	WriteTimeout      time.Duration
 	OnConnect         func(*Station)
 	OnDisconnect      func(*Station, error)
 	UniqueIDGenerator func() string // default uuid.NewString
@@ -138,6 +148,9 @@ func (config Config) validate() error {
 	}
 	if config.HandshakeTimeout < 0 {
 		return fmt.Errorf("station: HandshakeTimeout must not be negative")
+	}
+	if config.WriteTimeout < 0 {
+		return fmt.Errorf("station: WriteTimeout must not be negative")
 	}
 	if config.ReconnectPolicy != nil && (config.ReconnectPolicy.InitialDelay < 0 || config.ReconnectPolicy.MaxDelay < 0) {
 		return fmt.Errorf("station: ReconnectPolicy delays must not be negative")
@@ -181,14 +194,15 @@ func (e *CallError) Error() string { return e.Description }
 // observe disconnection instead of running indefinitely, matching how
 // csms.Session runs handlers with its own session-scoped context.
 type stationConn struct {
-	conn      *websocket.Conn
-	ctx       context.Context
-	cancel    context.CancelFunc
-	writeMu   sync.Mutex
-	pendingMu sync.Mutex
-	pending   map[string]chan callOutcome
-	closed    chan struct{}
-	closeOnce sync.Once
+	conn         *websocket.Conn
+	ctx          context.Context
+	cancel       context.CancelFunc
+	writeMu      sync.Mutex
+	writeTimeout time.Duration
+	pendingMu    sync.Mutex
+	pending      map[string]chan callOutcome
+	closed       chan struct{}
+	closeOnce    sync.Once
 }
 
 // newStationConn derives conn's ctx from parent (Run's ctx), not
@@ -196,9 +210,9 @@ type stationConn struct {
 // caller attached to Run's ctx, and observe the caller canceling Run
 // directly rather than only through runConnection's watcher goroutine
 // forcing the socket closed.
-func newStationConn(parent context.Context, conn *websocket.Conn) *stationConn {
+func newStationConn(parent context.Context, conn *websocket.Conn, writeTimeout time.Duration) *stationConn {
 	ctx, cancel := context.WithCancel(parent)
-	return &stationConn{conn: conn, ctx: ctx, cancel: cancel, pending: make(map[string]chan callOutcome), closed: make(chan struct{})}
+	return &stationConn{conn: conn, ctx: ctx, cancel: cancel, writeTimeout: writeTimeout, pending: make(map[string]chan callOutcome), closed: make(chan struct{})}
 }
 
 func (c *stationConn) close(cause error) {
@@ -267,7 +281,14 @@ func (c *stationConn) resolve(message protocol.Message) {
 	}
 }
 
-func (c *stationConn) send(message protocol.Message) error {
+// send writes message to the wire, bounding the actual WriteMessage call
+// via SetWriteDeadline (ctx's deadline if it has one and it's sooner, else
+// c.writeTimeout) — matching csms.Session.send. A context deadline alone
+// does nothing to bound a blocking WriteMessage call; this is the real
+// socket-level deadline that does, so a stalled write (e.g. the CSMS not
+// reading) can't block ctx's caller indefinitely regardless of what
+// deadline ctx carries.
+func (c *stationConn) send(ctx context.Context, message protocol.Message) error {
 	data, err := protocol.Encode(message)
 	if err != nil {
 		return err
@@ -279,6 +300,20 @@ func (c *stationConn) send(message protocol.Message) error {
 		return ErrNotConnected
 	default:
 	}
+	deadline, hasDeadline := ctx.Deadline()
+	if c.writeTimeout > 0 {
+		configured := time.Now().Add(c.writeTimeout)
+		if !hasDeadline || configured.Before(deadline) {
+			deadline, hasDeadline = configured, true
+		}
+	}
+	if hasDeadline {
+		if err := c.conn.SetWriteDeadline(deadline); err != nil {
+			return err
+		}
+	} else {
+		_ = c.conn.SetWriteDeadline(time.Time{})
+	}
 	return c.conn.WriteMessage(websocket.TextMessage, data)
 }
 
@@ -289,6 +324,7 @@ func (c *stationConn) send(message protocol.Message) error {
 type Station struct {
 	config       Config
 	uniqueIDGen  func() string
+	writeTimeout time.Duration
 	handlersMu   sync.RWMutex
 	handlers     map[string]func(context.Context, json.RawMessage) (json.RawMessage, error)
 	handlerSlots chan struct{}
@@ -318,9 +354,14 @@ func New(config Config) (*Station, error) {
 	if maxQueuedHandlers == 0 {
 		maxQueuedHandlers = 4 * maxConcurrentHandlers
 	}
+	writeTimeout := config.WriteTimeout
+	if writeTimeout == 0 {
+		writeTimeout = defaultWriteTimeout
+	}
 	return &Station{
 		config:       config,
 		uniqueIDGen:  generator,
+		writeTimeout: writeTimeout,
 		handlers:     make(map[string]func(context.Context, json.RawMessage) (json.RawMessage, error)),
 		handlerSlots: make(chan struct{}, maxConcurrentHandlers),
 		pendingSlots: make(chan struct{}, maxQueuedHandlers),
@@ -489,7 +530,7 @@ func (s *Station) dial(ctx context.Context) (*stationConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newStationConn(ctx, conn), nil
+	return newStationConn(ctx, conn, s.writeTimeout), nil
 }
 
 // runConnection runs the read loop until it exits on its own (connection
@@ -549,7 +590,7 @@ func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 	handler, ok := s.handlers[call.Action]
 	s.handlersMu.RUnlock()
 	if !ok {
-		_ = conn.send(protocol.CallError{
+		_ = conn.send(conn.ctx, protocol.CallError{
 			ID: call.ID, Code: "NotImplemented",
 			Description: "no station handler registered for " + call.Action, Details: json.RawMessage(`{}`),
 		})
@@ -562,7 +603,7 @@ func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 		// handlerSlots slot: reject this one immediately instead of
 		// piling up an unbounded number of goroutines (each holding its
 		// own stack and the CALL's payload) waiting behind them.
-		_ = conn.send(protocol.CallError{
+		_ = conn.send(conn.ctx, protocol.CallError{
 			ID: call.ID, Code: "GenericError",
 			Description: "too many pending calls", Details: json.RawMessage(`{}`),
 		})
@@ -581,7 +622,7 @@ func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 		// working even if someone later reordered the two statements.
 		defer func() {
 			if recover() != nil {
-				_ = conn.send(protocol.CallError{ID: call.ID, Code: "InternalError", Description: "internal error", Details: json.RawMessage(`{}`)})
+				_ = conn.send(conn.ctx, protocol.CallError{ID: call.ID, Code: "InternalError", Description: "internal error", Details: json.RawMessage(`{}`)})
 			}
 			<-s.handlerSlots
 		}()
@@ -593,13 +634,13 @@ func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 				if details == nil {
 					details = json.RawMessage(`{}`)
 				}
-				_ = conn.send(protocol.CallError{ID: call.ID, Code: callErr.Code, Description: callErr.Description, Details: details})
+				_ = conn.send(conn.ctx, protocol.CallError{ID: call.ID, Code: callErr.Code, Description: callErr.Description, Details: details})
 				return
 			}
-			_ = conn.send(protocol.CallError{ID: call.ID, Code: "InternalError", Description: err.Error(), Details: json.RawMessage(`{}`)})
+			_ = conn.send(conn.ctx, protocol.CallError{ID: call.ID, Code: "InternalError", Description: err.Error(), Details: json.RawMessage(`{}`)})
 			return
 		}
-		_ = conn.send(protocol.CallResult{ID: call.ID, Payload: payload})
+		_ = conn.send(conn.ctx, protocol.CallResult{ID: call.ID, Payload: payload})
 	}()
 }
 

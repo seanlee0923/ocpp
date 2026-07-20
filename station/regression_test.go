@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/seanlee0923/ocpp/csms"
 	"github.com/seanlee0923/ocpp/protocol"
 	"github.com/seanlee0923/ocpp/station"
@@ -271,6 +274,62 @@ func TestStationRejectsCallsOnceHandlerQueueIsFull(t *testing.T) {
 	case err := <-results:
 		t.Fatalf("a second call resolved (err=%v) before the blocking handler was released", err)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestStationCallWriteHonorsContextTimeout proves Call's outbound write is
+// actually bounded by a deadline (Config.WriteTimeout, or ctx's own
+// deadline if sooner), not just the ctx-cancellation check in Call's
+// select — a context deadline alone does nothing to stop a blocking
+// WriteMessage call, only an actual socket write deadline does. The CSMS
+// side here completes the WebSocket handshake normally but then never
+// reads another byte, and the station sends an oversized payload, so the
+// write genuinely backs up at the TCP level instead of just simulating a
+// slow handler.
+func TestStationCallWriteHonorsContextTimeout(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	accepted := make(chan *websocket.Conn, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		if tcpConn, ok := conn.UnderlyingConn().(*net.TCPConn); ok {
+			_ = tcpConn.SetReadBuffer(1024)
+		}
+		accepted <- conn
+		// Deliberately no read loop: the connection accepts the handshake
+		// and then goes silent, so nothing ever drains what the station
+		// writes.
+	}))
+	defer server.Close()
+
+	st, err := station.New(station.Config{
+		URL: wsURL(server.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		WriteTimeout: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	waitConnected(t, st)
+
+	conn := <-accepted
+	defer conn.Close()
+
+	large := strings.Repeat("x", 2<<20) // 2MB: large enough to exceed OS socket buffers even though the receiver's read buffer was shrunk.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err = station.Call[v16.DataTransferRequest, v16.DataTransferConfirmation](
+		ctx, st, v16.DataTransferRequest{VendorID: "test", Data: &large},
+	)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("Call succeeded even though the CSMS never read anything off the wire")
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("Call took %v to return, want it bounded by WriteTimeout (200ms), well under ctx's own 1s deadline", elapsed)
 	}
 }
 

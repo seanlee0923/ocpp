@@ -57,7 +57,7 @@ func Call[Request protocol.Payload, Confirmation protocol.Payload](
 	}
 	defer cancel()
 
-	if err := conn.send(protocol.Call{ID: id, Action: request.ActionName(), Payload: payload}); err != nil {
+	if err := conn.send(callCtx, protocol.Call{ID: id, Action: request.ActionName(), Payload: payload}); err != nil {
 		return zero, err
 	}
 
