@@ -109,7 +109,7 @@ func TestInboundHandlersApplyPerSessionBackpressure(t *testing.T) {
 
 func TestHandlerBackpressureDoesNotBlockOutboundCallResponse(t *testing.T) {
 	router := NewRouter()
-	started := make(chan struct{})
+	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *Session, json.RawMessage) (any, error) {
 		select {
