@@ -101,10 +101,17 @@ type Config struct {
 	CallTimeout           time.Duration
 	MaxPendingCalls       int
 	MaxConcurrentHandlers int // default 16; bounds concurrent inbound CALL handler goroutines, matching csms.Config.MaxConcurrentHandlers
-	HandshakeTimeout      time.Duration
-	OnConnect             func(*Station)
-	OnDisconnect          func(*Station, error)
-	UniqueIDGenerator     func() string // default uuid.NewString
+	// MaxQueuedHandlers bounds how many inbound CALLs may be admitted
+	// (running or waiting for a free MaxConcurrentHandlers slot) at once.
+	// Default: 4x MaxConcurrentHandlers, matching csms.Config.MaxQueuedHandlers.
+	// Once full, a further inbound CALL gets an immediate CALLERROR
+	// instead of an unbounded number of goroutines piling up waiting for a
+	// slot.
+	MaxQueuedHandlers int
+	HandshakeTimeout  time.Duration
+	OnConnect         func(*Station)
+	OnDisconnect      func(*Station, error)
+	UniqueIDGenerator func() string // default uuid.NewString
 }
 
 func (config Config) validate() error {
@@ -125,6 +132,9 @@ func (config Config) validate() error {
 	}
 	if config.MaxConcurrentHandlers < 0 {
 		return fmt.Errorf("station: MaxConcurrentHandlers must not be negative")
+	}
+	if config.MaxQueuedHandlers < 0 {
+		return fmt.Errorf("station: MaxQueuedHandlers must not be negative")
 	}
 	if config.HandshakeTimeout < 0 {
 		return fmt.Errorf("station: HandshakeTimeout must not be negative")
@@ -282,6 +292,7 @@ type Station struct {
 	handlersMu   sync.RWMutex
 	handlers     map[string]func(context.Context, json.RawMessage) (json.RawMessage, error)
 	handlerSlots chan struct{}
+	pendingSlots chan struct{}
 	connMu       sync.RWMutex
 	conn         *stationConn
 	state        atomic.Uint32
@@ -303,11 +314,16 @@ func New(config Config) (*Station, error) {
 	if maxConcurrentHandlers == 0 {
 		maxConcurrentHandlers = defaultMaxConcurrentHandlers
 	}
+	maxQueuedHandlers := config.MaxQueuedHandlers
+	if maxQueuedHandlers == 0 {
+		maxQueuedHandlers = 4 * maxConcurrentHandlers
+	}
 	return &Station{
 		config:       config,
 		uniqueIDGen:  generator,
 		handlers:     make(map[string]func(context.Context, json.RawMessage) (json.RawMessage, error)),
 		handlerSlots: make(chan struct{}, maxConcurrentHandlers),
+		pendingSlots: make(chan struct{}, maxQueuedHandlers),
 		stopCh:       make(chan struct{}),
 	}, nil
 }
@@ -516,13 +532,18 @@ func (s *Station) readLoop(conn *stationConn) error {
 	}
 }
 
-// dispatch runs a registered handler for an inbound CALL. It blocks until a
-// handler slot is available (bounded by Config.MaxConcurrentHandlers,
-// mirroring csms.Session's handlerSlots backpressure) or the connection
-// closes, whichever comes first, then runs the handler on its own
-// goroutine. A panicking handler is recovered and reported as an
-// InternalError CALLERROR instead of crashing the Station, matching
-// csms.Server's handleCall panic recovery.
+// dispatch admits and runs a registered handler for an inbound CALL. Like
+// csms.Session.startHandler, admission (the pendingSlots check just below)
+// never blocks and only bounds how many CALLs may be running or waiting
+// for a free Config.MaxConcurrentHandlers slot at once
+// (Config.MaxQueuedHandlers) — dispatch itself must never block, since
+// this is the Station's one and only connection, and its read loop also
+// resolves this same connection's outbound Call responses (conn.resolve).
+// Blocking here on handler-slot availability would let a burst of inbound
+// CALLs starve/spuriously time out unrelated pending outbound Calls queued
+// behind them in the same byte stream. A panicking handler is recovered
+// and reported as an InternalError CALLERROR instead of crashing the
+// Station, matching csms.Server's handleCall panic recovery.
 func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 	s.handlersMu.RLock()
 	handler, ok := s.handlers[call.Action]
@@ -534,17 +555,21 @@ func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 		})
 		return
 	}
+	select {
+	case s.pendingSlots <- struct{}{}:
+	default:
+		// Every pendingSlots slot is already running or waiting for a free
+		// handlerSlots slot: reject this one immediately instead of
+		// piling up an unbounded number of goroutines (each holding its
+		// own stack and the CALL's payload) waiting behind them.
+		_ = conn.send(protocol.CallError{
+			ID: call.ID, Code: "GenericError",
+			Description: "too many pending calls", Details: json.RawMessage(`{}`),
+		})
+		return
+	}
 	go func() {
-		// The slot semaphore is acquired here, inside the goroutine, not
-		// before spawning it: this is the Station's one and only
-		// connection, and its read loop also resolves this same
-		// connection's outbound Call responses (conn.resolve). Blocking
-		// the read loop itself on handler-slot availability would let a
-		// burst of inbound CALLs starve/spuriously time out unrelated
-		// pending outbound Calls queued behind them in the same byte
-		// stream — a cost csms.Session.startHandler doesn't pay, since
-		// each csms session's read loop only ever blocks its own single
-		// charging station, never the server's calls to other sessions.
+		defer func() { <-s.pendingSlots }()
 		select {
 		case s.handlerSlots <- struct{}{}:
 		case <-conn.closed:

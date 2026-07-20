@@ -200,6 +200,80 @@ func TestStationHandlerContextCanceledOnDisconnect(t *testing.T) {
 	}
 }
 
+// TestStationRejectsCallsOnceHandlerQueueIsFull proves dispatch's admission
+// bound (Config.MaxQueuedHandlers) rejects an overflow CALL with an
+// immediate CALLERROR instead of piling up an unbounded number of
+// goroutines waiting for a free handler slot.
+func TestStationRejectsCallsOnceHandlerQueueIsFull(t *testing.T) {
+	connected := make(chan *csms.Session, 1)
+	server, err := csms.New(csms.Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st, err := station.New(station.Config{
+		URL: wsURL(httpServer.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		MaxConcurrentHandlers: 1, MaxQueuedHandlers: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	waitConnected(t, st)
+
+	block := make(chan struct{})
+	defer close(block)
+	if err := station.Handle(st, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		<-block
+		return v16.ResetConfirmation{Status: v16.ResetConfirmationStatusAccepted}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session := <-connected
+	// MaxQueuedHandlers=2 caps how many CALLs may be admitted at once,
+	// running or waiting for the sole MaxConcurrentHandlers=1 slot. The 1st
+	// call occupies that slot (blocked on <-block), the 2nd fills the
+	// remaining admission slot (also blocked, waiting for the handler
+	// slot), and the 3rd must be rejected immediately since admission is
+	// already fully spoken for.
+	results := make(chan error, 3)
+	for range 3 {
+		go func() {
+			_, err := csms.Call[v16.ResetRequest, v16.ResetConfirmation](
+				context.Background(), session, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+			)
+			results <- err
+		}()
+	}
+
+	select {
+	case err := <-results:
+		var remoteErr *csms.RemoteCallError
+		if !errors.As(err, &remoteErr) {
+			t.Fatalf("error = %v, want a RemoteCallError", err)
+		}
+		if remoteErr.Code != csms.GenericError {
+			t.Fatalf("CALLERROR code = %q, want %q", remoteErr.Code, csms.GenericError)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected one call to be rejected immediately, but no result arrived in time")
+	}
+
+	// The other two calls must still be blocked (one running, one queued),
+	// not also rejected or somehow completed early.
+	select {
+	case err := <-results:
+		t.Fatalf("a second call resolved (err=%v) before the blocking handler was released", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestStationBoundsConcurrentHandlers(t *testing.T) {
 	const limit = 2
 
