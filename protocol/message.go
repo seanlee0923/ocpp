@@ -237,7 +237,7 @@ func validateJSONSyntax(data []byte) error {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
-	if err := parseJSONValue(decoder); err != nil {
+	if err := parseJSONValue(decoder, 0); err != nil {
 		return err
 	}
 	if _, err := decoder.Token(); err != io.EOF {
@@ -249,7 +249,18 @@ func validateJSONSyntax(data []byte) error {
 	return nil
 }
 
-func parseJSONValue(decoder *json.Decoder) error {
+// maxJSONDepth bounds how deeply nested a `{`/`[` frame's JSON is allowed to
+// be. Without a limit, a frame well within the default ReadLimit (e.g.
+// ~500K nested `[`) drives a matching amount of Go call-stack growth in
+// parseJSONValue — a real stack overflow, which is an unrecoverable runtime
+// fatal error (not a panic), crashing the whole process rather than just
+// rejecting one frame. 64 comfortably covers any real OCPP payload shape.
+const maxJSONDepth = 64
+
+func parseJSONValue(decoder *json.Decoder, depth int) error {
+	if depth > maxJSONDepth {
+		return fmt.Errorf("JSON nesting exceeds maximum depth of %d", maxJSONDepth)
+	}
 	token, err := decoder.Token()
 	if err != nil {
 		return err
@@ -274,7 +285,7 @@ func parseJSONValue(decoder *json.Decoder) error {
 				return fmt.Errorf("duplicate JSON object key %q", key)
 			}
 			seen[key] = struct{}{}
-			if err := parseJSONValue(decoder); err != nil {
+			if err := parseJSONValue(decoder, depth+1); err != nil {
 				return err
 			}
 		}
@@ -287,7 +298,7 @@ func parseJSONValue(decoder *json.Decoder) error {
 		}
 	case '[':
 		for decoder.More() {
-			if err := parseJSONValue(decoder); err != nil {
+			if err := parseJSONValue(decoder, depth+1); err != nil {
 				return err
 			}
 		}
