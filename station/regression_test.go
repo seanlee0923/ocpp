@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -472,25 +473,53 @@ func TestStationRejectsCallsOnceHandlerQueueIsFull(t *testing.T) {
 // write genuinely backs up at the TCP level instead of just simulating a
 // slow handler.
 func TestStationCallWriteHonorsContextTimeout(t *testing.T) {
+	// SO_RCVBUF is set on the *listening* socket, before any handshake
+	// happens, not after Accept: setting it post-accept (via
+	// (*net.TCPConn).SetReadBuffer on the already-established connection,
+	// tried first here) turned out not to reliably shrink the receive
+	// window on every platform/kernel — the window scaling gorilla's TCP
+	// handshake negotiates can already be locked in by then, so a large
+	// enough write can still complete without ever blocking (observed:
+	// reliably reproduced the write-blocks-until-WriteTimeout condition on
+	// macOS, but not on Linux CI, where the write went through immediately
+	// and the test only caught the outer 1s ctx deadline instead of the
+	// inner 200ms WriteTimeout it's meant to prove). Setting it on the
+	// listening socket via ListenConfig.Control applies before the
+	// three-way handshake, so the small window is actually in effect from
+	// the start on both platforms.
+	lc := net.ListenConfig{Control: func(_, _ string, c syscall.RawConn) error {
+		var sockErr error
+		if err := c.Control(func(fd uintptr) {
+			sockErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_RCVBUF, 1024)
+		}); err != nil {
+			return err
+		}
+		return sockErr
+	}}
+	listener, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	upgrader := websocket.Upgrader{}
 	accepted := make(chan *websocket.Conn, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
-		}
-		if tcpConn, ok := conn.UnderlyingConn().(*net.TCPConn); ok {
-			_ = tcpConn.SetReadBuffer(1024)
 		}
 		accepted <- conn
 		// Deliberately no read loop: the connection accepts the handshake
 		// and then goes silent, so nothing ever drains what the station
 		// writes.
 	}))
-	defer server.Close()
+	testServer.Listener.Close()
+	testServer.Listener = listener
+	testServer.Start()
+	defer testServer.Close()
 
 	st, err := station.New(station.Config{
-		URL: wsURL(server.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		URL: wsURL(testServer.URL), Identity: "CP-001", Version: protocol.OCPP16,
 		WriteTimeout: 200 * time.Millisecond,
 	})
 	if err != nil {
@@ -502,8 +531,8 @@ func TestStationCallWriteHonorsContextTimeout(t *testing.T) {
 	conn := <-accepted
 	defer conn.Close()
 
-	large := strings.Repeat("x", 2<<20) // 2MB: large enough to exceed OS socket buffers even though the receiver's read buffer was shrunk.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	large := strings.Repeat("x", 8<<20) // 8MB: comfortably exceeds even a generously auto-tuned receive window.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	start := time.Now()
 	_, err = station.Call[v16.DataTransferRequest, v16.DataTransferConfirmation](
@@ -513,8 +542,14 @@ func TestStationCallWriteHonorsContextTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("Call succeeded even though the CSMS never read anything off the wire")
 	}
-	if elapsed >= time.Second {
-		t.Fatalf("Call took %v to return, want it bounded by WriteTimeout (200ms), well under ctx's own 1s deadline", elapsed)
+	// A generous margin above WriteTimeout (200ms) but comfortably below
+	// ctx's own 10s: wide enough to absorb a slow/shared CI runner
+	// (marshaling 8MB under -race in particular) without either shrinking
+	// to the point of flaking on slower machines or growing so wide that
+	// it stops actually distinguishing "bounded by WriteTimeout" from
+	// "just eventually hit the outer ctx deadline".
+	if elapsed >= 5*time.Second {
+		t.Fatalf("Call took %v to return, want it bounded by WriteTimeout (200ms), well under ctx's own 10s deadline", elapsed)
 	}
 }
 
