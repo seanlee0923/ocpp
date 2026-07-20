@@ -311,11 +311,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err = <-readResult
 	_ = session.closeWithError(err)
 	s.unregisterSession(session)
+	// session.Err() (not the raw readLoop return above) is the true cause:
+	// closeWithError only ever applies the *first* cause it's given
+	// (sync.Once). If a concurrent closeWithError elsewhere (idle timeout,
+	// Shutdown, a duplicate-session replacement) already fired and force-
+	// closed the connection, readLoop's own err here is just a generic
+	// "connection closed" error surfaced by the unblocked ReadMessage —
+	// session.Err() still holds the real, typed cause that was recorded
+	// first.
+	cause := session.Err()
 	if s.config.OnDisconnect != nil {
-		s.config.OnDisconnect(session, err)
+		s.config.OnDisconnect(session, cause)
 	}
 	record := sessionLogRecord(session, LogInfo, LogSessionDisconnected)
-	record.Reason = disconnectReason(err)
+	record.Reason = disconnectReason(cause)
 	s.log(context.Background(), record)
 	session.recordMetric(MetricEvent{
 		Type: MetricSessionDisconnected, Identity: session.identity, Version: session.version,
