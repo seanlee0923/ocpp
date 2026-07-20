@@ -186,6 +186,38 @@ type CallError struct {
 
 func (e *CallError) Error() string { return e.Description }
 
+// normalizeCallError makes a handler-returned *CallError's fields safe to
+// encode as a wire CALLERROR before ever attempting to send it, mirroring
+// how csms's handleCall validates/truncates a handler-returned CallError.
+// Without this, a handler that returns an invalid code (empty or over
+// protocol.MaxErrorCodeLength), an overlong description, or Details that
+// isn't a JSON object makes protocol.Encode fail — and since dispatch's
+// conn.send call ignores that error (there is nothing else useful to do
+// with it at that point), the CSMS would be left with no response at all
+// for a CALL it's waiting on, rather than a well-formed one.
+func normalizeCallError(code, description string, details json.RawMessage) (string, string, json.RawMessage) {
+	if code == "" || utf8.RuneCountInString(code) > protocol.MaxErrorCodeLength {
+		code = "InternalError"
+	}
+	description = truncateRunes(description, protocol.MaxErrorDescriptionLength)
+	if len(details) == 0 {
+		return code, description, json.RawMessage(`{}`)
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(details, &object) != nil || object == nil {
+		details = json.RawMessage(`{}`)
+	}
+	return code, description, details
+}
+
+func truncateRunes(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
+}
+
 // stationConn is the state of one underlying WebSocket connection. A fresh
 // stationConn replaces the old one on every reconnect; pending calls do not
 // survive a reconnect, matching how csms.Session.closeWithError cancels
@@ -616,31 +648,49 @@ func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 		case <-conn.closed:
 			return
 		}
+		// A per-call bound, not just conn.ctx directly: conn.ctx only ends
+		// when the whole connection does, so without this a handler that
+		// never returns permanently occupies its handlerSlots slot,
+		// matching why csms.Session.startHandler bounds its own handler
+		// invocations by Config.CallTimeout instead of only the session's
+		// ctx. This ctx also covers the response sends below (not just the
+		// handler call), matching csms.Server.handleCall's own scoping.
+		ctx := conn.ctx
+		if s.config.CallTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(conn.ctx, s.config.CallTimeout)
+			defer cancel()
+		}
 		// Recover before releasing the slot: a single closure makes that
 		// order explicit in the code instead of relying on two separate
 		// defers' LIFO registration order, which would silently keep
 		// working even if someone later reordered the two statements.
 		defer func() {
 			if recover() != nil {
-				_ = conn.send(conn.ctx, protocol.CallError{ID: call.ID, Code: "InternalError", Description: "internal error", Details: json.RawMessage(`{}`)})
+				_ = conn.send(ctx, protocol.CallError{ID: call.ID, Code: "InternalError", Description: "internal error", Details: json.RawMessage(`{}`)})
 			}
 			<-s.handlerSlots
 		}()
-		payload, err := handler(conn.ctx, call.Payload)
+		payload, err := handler(ctx, call.Payload)
 		if err != nil {
 			var callErr *CallError
 			if errors.As(err, &callErr) {
-				details := callErr.Details
-				if details == nil {
-					details = json.RawMessage(`{}`)
-				}
-				_ = conn.send(conn.ctx, protocol.CallError{ID: call.ID, Code: callErr.Code, Description: callErr.Description, Details: details})
+				code, description, details := normalizeCallError(callErr.Code, callErr.Description, callErr.Details)
+				_ = conn.send(ctx, protocol.CallError{ID: call.ID, Code: code, Description: description, Details: details})
 				return
 			}
-			_ = conn.send(conn.ctx, protocol.CallError{ID: call.ID, Code: "InternalError", Description: err.Error(), Details: json.RawMessage(`{}`)})
+			// A plain (non-*CallError) handler error is never sent as-is:
+			// its Error() string is application-internal detail (DB
+			// errors, file paths, internal hostnames, ...) with no reason
+			// to cross the wire to the CSMS, matching how csms's handleCall
+			// normalizes an unrecognized handler error to a fixed
+			// "internal error" instead of relaying err.Error(). A handler
+			// that wants to disclose a specific code/description to the
+			// CSMS should return *CallError, not rely on this fallback.
+			_ = conn.send(ctx, protocol.CallError{ID: call.ID, Code: "InternalError", Description: "internal error", Details: json.RawMessage(`{}`)})
 			return
 		}
-		_ = conn.send(conn.ctx, protocol.CallResult{ID: call.ID, Payload: payload})
+		_ = conn.send(ctx, protocol.CallResult{ID: call.ID, Payload: payload})
 	}()
 }
 

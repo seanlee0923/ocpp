@@ -2,6 +2,7 @@ package station_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -52,6 +53,92 @@ func TestStationHandlerPanicIsRecovered(t *testing.T) {
 
 	if st.State() != station.Connected {
 		t.Fatalf("state after handler panic = %v, want Connected (Station must survive a panicking handler)", st.State())
+	}
+}
+
+// TestStationHandlerErrorDoesNotLeakDetails proves a plain (non-*CallError)
+// handler error never reaches the CSMS as-is: only a fixed "internal
+// error" description crosses the wire, matching how csms's handleCall
+// normalizes an unrecognized handler error instead of relaying its
+// Error() string (which could be a DB error, a file path, an internal
+// hostname, ...).
+func TestStationHandlerErrorDoesNotLeakDetails(t *testing.T) {
+	connected := make(chan *csms.Session, 1)
+	server, err := csms.New(csms.Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st := dialStation(t, httpServer.URL, "CP-001", nil)
+	sensitive := "connect to postgres://internal-db.corp.example:5432 failed: password authentication failed for user \"admin\""
+	if err := station.Handle(st, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		return v16.ResetConfirmation{}, errors.New(sensitive)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session := <-connected
+	_, err = csms.Call[v16.ResetRequest, v16.ResetConfirmation](
+		context.Background(), session, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+	)
+	var remote *csms.RemoteCallError
+	if !errors.As(err, &remote) {
+		t.Fatalf("error = %v, want a RemoteCallError", err)
+	}
+	if remote.Code != csms.InternalError || remote.Description != "internal error" {
+		t.Fatalf("CALLERROR = %+v, want Code=InternalError Description=\"internal error\"", remote)
+	}
+	if strings.Contains(remote.Description, "postgres") || strings.Contains(remote.Description, "admin") {
+		t.Fatalf("CALLERROR description leaked handler error detail: %q", remote.Description)
+	}
+}
+
+// TestStationCallErrorIsNormalizedBeforeSend proves a handler-returned
+// *CallError that violates OCPP-J's wire constraints (an empty code, an
+// overlong description, non-object details) still reaches the CSMS as a
+// well-formed CALLERROR instead of silently producing no response at all
+// (protocol.Encode would otherwise reject it, and dispatch's conn.send
+// call has nowhere else to report that failure).
+func TestStationCallErrorIsNormalizedBeforeSend(t *testing.T) {
+	connected := make(chan *csms.Session, 1)
+	server, err := csms.New(csms.Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st := dialStation(t, httpServer.URL, "CP-001", nil)
+	overlongDescription := strings.Repeat("x", 300) // over protocol.MaxErrorDescriptionLength (255)
+	if err := station.Handle(st, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		return v16.ResetConfirmation{}, &station.CallError{
+			Code: "", Description: overlongDescription, Details: json.RawMessage(`[1,2,3]`),
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session := <-connected
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = csms.Call[v16.ResetRequest, v16.ResetConfirmation](ctx, session, v16.ResetRequest{Type: v16.ResetRequestTypeSoft})
+	var remote *csms.RemoteCallError
+	if !errors.As(err, &remote) {
+		t.Fatalf("error = %v, want a RemoteCallError (not a timeout from no response at all)", err)
+	}
+	if remote.Code != csms.InternalError {
+		t.Fatalf("CALLERROR code = %q, want InternalError (empty code should fall back)", remote.Code)
+	}
+	if len(remote.Description) > 255 {
+		t.Fatalf("CALLERROR description length = %d runes, want <= 255", len([]rune(remote.Description)))
 	}
 }
 
@@ -200,6 +287,63 @@ func TestStationHandlerContextCanceledOnDisconnect(t *testing.T) {
 	case <-canceled:
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler ctx was not canceled after the connection closed")
+	}
+}
+
+// TestStationHandlerContextCanceledOnCallTimeout proves an inbound
+// handler's ctx is bounded by Config.CallTimeout on its own — a handler
+// that never returns cannot occupy its handlerSlots slot for the whole
+// connection's lifetime, matching csms.Session.startHandler's per-call
+// bound (csms/session.go). Before this fix, dispatch only ever gave
+// handlers conn.ctx, so nothing canceled a handler short of the whole
+// connection closing.
+func TestStationHandlerContextCanceledOnCallTimeout(t *testing.T) {
+	connected := make(chan *csms.Session, 1)
+	server, err := csms.New(csms.Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st, err := station.New(station.Config{
+		URL: wsURL(httpServer.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		CallTimeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	waitConnected(t, st)
+
+	canceled := make(chan struct{})
+	if err := station.Handle(st, func(ctx context.Context, _ v16.ResetRequest) (v16.ResetConfirmation, error) {
+		<-ctx.Done()
+		close(canceled)
+		return v16.ResetConfirmation{Status: v16.ResetConfirmationStatusAccepted}, ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session := <-connected
+	go func() {
+		_, _ = csms.Call[v16.ResetRequest, v16.ResetConfirmation](
+			context.Background(), session, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+		)
+	}()
+
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler ctx was not canceled by CallTimeout")
+	}
+	// The connection itself must still be up: this was a per-call timeout,
+	// not a connection-level one.
+	if st.State() != station.Connected {
+		t.Fatalf("state after CallTimeout = %v, want Connected", st.State())
 	}
 }
 
