@@ -23,9 +23,20 @@ errors. Replacing a handler dynamically is not supported.
 Inbound payloads are validated against the official Schema constraints
 before the handler runs. The confirmation returned by the handler is
 validated again before it is sent. Handlers must respect `ctx` cancellation,
-which fires when the session closes or the server shuts down. A panic is
-isolated into an `InternalError` CALLERROR and does not crash the server,
-but it is not a substitute for proper error handling.
+which fires when the session closes, the server shuts down, or
+`Config.CallTimeout` elapses. A panic is isolated into an `InternalError`
+CALLERROR and does not crash the server, but it is not a substitute for
+proper error handling.
+
+`ctx` cancellation is a signal, not a forced termination — Go has no
+mechanism to kill a goroutine from the outside, so if a handler ignores
+cancellation and keeps running, the library cannot stop it. In that case the
+handler keeps executing an already-timed-out request and continues to hold
+one of the concurrent handler execution slots for as long as it runs; once
+those slots are exhausted, subsequent CALLs are rejected as the
+`pendingSlots`/handler queue being full. Handlers registered on the
+Charging Station side via `station.Handle` follow the same contract, with
+`station.Config.CallTimeout` playing the equivalent role.
 
 Expected OCPP errors are returned as `*csms.CallError`.
 
