@@ -59,8 +59,7 @@ type Session struct {
 	handlerWG         sync.WaitGroup
 	readDone          chan struct{}
 	uniqueIDGenerator func() string
-	metrics           Metrics
-	metricSlots       chan struct{}
+	metricQueue       chan MetricEvent
 	closed            chan struct{}
 	close             sync.Once
 	errMu             sync.RWMutex

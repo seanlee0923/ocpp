@@ -132,45 +132,71 @@ type MetricsFunc func(context.Context, MetricEvent)
 
 func (f MetricsFunc) Record(ctx context.Context, event MetricEvent) { f(ctx, event) }
 
-// maxConcurrentMetricDispatch bounds how many Metrics.Record calls may be
-// in flight at once across an entire Server. It exists only to cap goroutine
+// maxConcurrentMetricDispatch bounds how many MetricEvents may be queued for
+// dispatch at once across an entire Server, shared by every session on the
+// Server rather than allocated per session. It exists to cap memory/backlog
 // growth if an application's Metrics implementation hangs or is persistently
-// slow; healthy implementations never approach it. This budget is shared by
-// every session on the Server rather than allocated per session: if enough
-// sessions simultaneously accumulate hung (not panicking, merely never
-// returning) Record calls to exhaust it, event dispatch for unrelated,
-// healthy sessions starts silently dropping too. A hung (as opposed to slow)
-// Record implementation is already a bug in the application; this is a
-// last-resort ceiling on its blast radius, not a per-session fairness
-// guarantee.
+// slower than events are produced; healthy implementations never approach
+// it. If enough sessions simultaneously accumulate hung (not panicking,
+// merely never returning) Record calls to exhaust the workers draining this
+// queue, event dispatch for unrelated, healthy sessions starts silently
+// dropping too. A hung (as opposed to slow) Record implementation is already
+// a bug in the application; this is a last-resort ceiling on its blast
+// radius, not a per-session fairness guarantee.
 const maxConcurrentMetricDispatch = 1024
 
-// recordMetric is the only dispatch path to Session.metrics. It is used both
-// by the inbound handlers in server.go and by the outbound Call in call.go,
-// since Call only has access to a Session, never a Server. It never blocks
-// the caller: dispatch happens on a separate goroutine, bounded by
-// s.metricSlots, so a slow or hung Metrics implementation cannot delay
-// handler completion (and the handlerSlots it occupies) or Call's prompt
-// return on context cancellation. It always calls Record with
-// context.Background() (see the Metrics doc comment for why), so it takes
-// no context.Context parameter itself — there is nothing meaningful for a
-// caller to supply.
+// metricDispatchWorkers is how many long-lived goroutines drain a Server's
+// metric queue. It is deliberately much smaller than
+// maxConcurrentMetricDispatch: those goroutines are started once (in New)
+// and reused for the Server's whole lifetime, so — unlike the queue capacity
+// above, sized for a worst-case backlog — this only needs to be big enough
+// to keep up with the steady-state rate of genuinely concurrent Record
+// calls, which the Metrics doc comment already asks implementations to keep
+// fast (aggregate into counters/histograms, not perform I/O per event).
+const metricDispatchWorkers = 32
+
+// startMetricDispatch launches the fixed pool of goroutines that drain
+// queue and call metrics.Record for every event, replacing what used to be
+// a new goroutine spawned per MetricEvent (unbounded goroutine *creation*
+// churn under sustained message rate, even though concurrent goroutines
+// were already bounded by the old metricSlots semaphore). These goroutines
+// run for the Server's lifetime; queue is never closed, so they simply exit
+// if the process does. If metrics is nil, no workers are started and
+// recordMetric's nil-queue check makes dispatch a no-op.
+func startMetricDispatch(queue chan MetricEvent, metrics Metrics) {
+	for range metricDispatchWorkers {
+		go func() {
+			for event := range queue {
+				func() {
+					// A diagnostic hook must not be able to take down the
+					// protocol server.
+					defer func() { _ = recover() }()
+					metrics.Record(context.Background(), event)
+				}()
+			}
+		}()
+	}
+}
+
+// recordMetric is the only dispatch path to the Server's metric queue. It is
+// used both by the inbound handlers in server.go and by the outbound Call in
+// call.go, since Call only has access to a Session, never a Server. It never
+// blocks the caller: this only enqueues the event for one of the pool
+// goroutines started by startMetricDispatch to pick up, so a slow or hung
+// Metrics implementation cannot delay handler completion (and the
+// handlerSlots it occupies) or Call's prompt return on context cancellation.
+// Record is always called with context.Background() (see the Metrics doc
+// comment for why), so recordMetric takes no context.Context parameter
+// itself — there is nothing meaningful for a caller to supply.
 func (s *Session) recordMetric(event MetricEvent) {
-	if s.metrics == nil {
+	if s.metricQueue == nil {
 		return
 	}
 	select {
-	case s.metricSlots <- struct{}{}:
+	case s.metricQueue <- event:
 	default:
-		// Every in-flight dispatch slot is occupied by a Record call that
-		// has not returned; drop this event rather than block or queue
-		// unboundedly.
-		return
+		// The queue is full — every dispatch worker is busy long enough
+		// that maxConcurrentMetricDispatch events are already pending;
+		// drop this one rather than block or grow the queue unboundedly.
 	}
-	go func() {
-		defer func() { <-s.metricSlots }()
-		// A diagnostic hook must not be able to take down the protocol server.
-		defer func() { _ = recover() }()
-		s.metrics.Record(context.Background(), event)
-	}()
 }

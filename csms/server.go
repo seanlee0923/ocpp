@@ -101,7 +101,7 @@ type Server struct {
 	sessions            map[string]*sessionEntry
 	reservationSequence atomic.Uint64
 	shuttingDown        atomic.Bool
-	metricSlots         chan struct{}
+	metricQueue         chan MetricEvent
 }
 
 type sessionEntry struct {
@@ -176,16 +176,20 @@ func New(config Config) (*Server, error) {
 	for i, version := range config.Versions {
 		protocols[i] = string(version)
 	}
-	return &Server{
-		config:      config,
-		sessions:    make(map[string]*sessionEntry),
-		metricSlots: make(chan struct{}, maxConcurrentMetricDispatch),
+	server := &Server{
+		config:   config,
+		sessions: make(map[string]*sessionEntry),
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: config.HandshakeTimeout,
 			Subprotocols:     protocols,
 			CheckOrigin:      config.CheckOrigin,
 		},
-	}, nil
+	}
+	if config.Metrics != nil {
+		server.metricQueue = make(chan MetricEvent, maxConcurrentMetricDispatch)
+		startMetricDispatch(server.metricQueue, config.Metrics)
+	}
+	return server, nil
 }
 
 // ServeHTTP accepts /{chargePointIdentity} and negotiates an OCPP subprotocol.
@@ -263,8 +267,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		handlerSlots:      make(chan struct{}, s.config.MaxConcurrentHandlers),
 		readDone:          make(chan struct{}),
 		uniqueIDGenerator: s.config.UniqueIDGenerator,
-		metrics:           s.config.Metrics,
-		metricSlots:       s.metricSlots,
+		metricQueue:       s.metricQueue,
 		closed:            make(chan struct{}), connectedAt: time.Now(),
 	}
 	session.state.Store(uint32(SessionActive))
