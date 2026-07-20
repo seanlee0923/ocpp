@@ -239,6 +239,343 @@ func TestHandleRejectsConfirmationVersionMismatch(t *testing.T) {
 	}
 }
 
+// TestCallRejectsMismatchedPayloadDirection proves Call rejects a type
+// parameter pair swapped the wrong way round (a confirmation type used as
+// the request, and vice versa) instead of silently sending a confirmation
+// payload as an outbound CALL.
+func TestCallRejectsMismatchedPayloadDirection(t *testing.T) {
+	st, err := station.New(station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = station.Call[v16.ResetConfirmation, v16.ResetRequest](
+		context.Background(), st, v16.ResetConfirmation{Status: v16.ResetConfirmationStatusAccepted},
+	)
+	if err == nil || !strings.Contains(err.Error(), "requires a request followed by a confirmation") {
+		t.Fatalf("error = %v, want a direction-mismatch error", err)
+	}
+}
+
+// TestCallRejectsVersionMismatchWithStation proves Call rejects a request
+// whose OCPP version doesn't match the Station's configured version, rather
+// than sending a CALL the CSMS never negotiated support for.
+func TestCallRejectsVersionMismatchWithStation(t *testing.T) {
+	st, err := station.New(station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = station.Call[v201.ResetRequest, v201.ResetConfirmation](
+		context.Background(), st, v201.ResetRequest{Type: v201.ResetRequestResetEnumImmediate},
+	)
+	if err == nil || !strings.Contains(err.Error(), "does not match station version") {
+		t.Fatalf("error = %v, want a station-version-mismatch error", err)
+	}
+}
+
+// TestCallRejectsMismatchedRequestConfirmationAction proves Call rejects a
+// Request/Confirmation pair that share an OCPP version but belong to
+// different actions (Reset vs Heartbeat), instead of waiting on a CALLRESULT
+// the CSMS will never send under that action name.
+func TestCallRejectsMismatchedRequestConfirmationAction(t *testing.T) {
+	st, err := station.New(station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = station.Call[v16.ResetRequest, v16.HeartbeatConfirmation](
+		context.Background(), st, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+	)
+	if err == nil || !strings.Contains(err.Error(), "metadata do not match") {
+		t.Fatalf("error = %v, want a request/confirmation metadata mismatch error", err)
+	}
+}
+
+// TestCallRejectsInvalidOutgoingRequest proves Call validates the outgoing
+// request against its own Schema before ever touching the connection, so a
+// caller-constructed request with an invalid enum value fails locally
+// instead of being sent to the CSMS malformed.
+func TestCallRejectsInvalidOutgoingRequest(t *testing.T) {
+	st, err := station.New(station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = station.Call[v16.ResetRequest, v16.ResetConfirmation](
+		context.Background(), st, v16.ResetRequest{}, // zero-value Type is not "Hard" or "Soft"
+	)
+	if err == nil || !strings.Contains(err.Error(), "validate outgoing") {
+		t.Fatalf("error = %v, want a request-validation error", err)
+	}
+}
+
+// TestCallAppliesCallTimeoutWhenCtxHasNoDeadline proves Config.CallTimeout
+// bounds a Call whose caller-supplied ctx carries no deadline of its own,
+// not just a Call whose caller already set a shorter one.
+func TestCallAppliesCallTimeoutWhenCtxHasNoDeadline(t *testing.T) {
+	upgrader := websocket.Upgrader{Subprotocols: []string{string(protocol.OCPP16)}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		// Deliberately no reply: the CSMS never answers, so only
+		// Config.CallTimeout (not a caller ctx deadline, which this test
+		// never supplies) can end the Call.
+		_ = conn
+	}))
+	defer server.Close()
+
+	st, err := station.New(station.Config{
+		URL: wsURL(server.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		CallTimeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	waitConnected(t, st)
+
+	start := time.Now()
+	_, err = station.Call[v16.ResetRequest, v16.ResetConfirmation](
+		context.Background(), st, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+	)
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("Call took %v to time out, want it bounded by CallTimeout (100ms)", elapsed)
+	}
+}
+
+// TestCallReturnsRemoteCallError proves a CALLERROR the CSMS sends in
+// response to a Station-initiated Call surfaces as a *station.RemoteCallError
+// carrying the wire code/description, not a generic decode failure.
+func TestCallReturnsRemoteCallError(t *testing.T) {
+	router := csms.NewRouter()
+	if err := csms.Handle(router, func(context.Context, *csms.Session, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		return v16.ResetConfirmation{}, &csms.CallError{Code: csms.NotSupported, Description: "reset is disabled"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st := dialStation(t, httpServer.URL, "CP-001", nil)
+	_, err = station.Call[v16.ResetRequest, v16.ResetConfirmation](
+		context.Background(), st, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+	)
+	var remote *station.RemoteCallError
+	if !errors.As(err, &remote) {
+		t.Fatalf("error = %v, want a *station.RemoteCallError", err)
+	}
+	if remote.Code != string(csms.NotSupported) || remote.Description != "reset is disabled" {
+		t.Fatalf("RemoteCallError = %+v, want Code=%q Description=%q", remote, csms.NotSupported, "reset is disabled")
+	}
+}
+
+// TestCallRejectsInvalidConfirmationFromCSMS proves Call validates a
+// CALLRESULT's payload against the expected confirmation's Schema before
+// decoding it, so a CSMS that answers with a payload missing a required
+// field surfaces as a clear validation error instead of a zero-value
+// confirmation the caller could mistake for a real one.
+func TestCallRejectsInvalidConfirmationFromCSMS(t *testing.T) {
+	upgrader := websocket.Upgrader{Subprotocols: []string{string(protocol.OCPP16)}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		message, err := protocol.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		call, ok := message.(protocol.Call)
+		if !ok {
+			t.Errorf("message = %#v, want a CALL", message)
+			return
+		}
+		// ResetConfirmation requires "status"; this CALLRESULT omits it.
+		encoded, err := protocol.Encode(protocol.CallResult{ID: call.ID, Payload: json.RawMessage(`{}`)})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, encoded)
+	}))
+	defer server.Close()
+
+	st := dialStation(t, server.URL, "CP-001", nil)
+	_, err := station.Call[v16.ResetRequest, v16.ResetConfirmation](
+		context.Background(), st, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+	)
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("error = %v, want an error naming an invalid confirmation", err)
+	}
+}
+
+// TestHandleRejectsMismatchedPayloadDirection proves Handle rejects a type
+// parameter pair swapped the wrong way round, mirroring
+// TestCallRejectsMismatchedPayloadDirection for the inbound side.
+func TestHandleRejectsMismatchedPayloadDirection(t *testing.T) {
+	st, err := station.New(station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = station.Handle[v16.ResetConfirmation, v16.ResetRequest](st, func(context.Context, v16.ResetConfirmation) (v16.ResetRequest, error) {
+		return v16.ResetRequest{}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires a request followed by a confirmation") {
+		t.Fatalf("error = %v, want a direction-mismatch error", err)
+	}
+}
+
+// TestHandleRejectsVersionMismatchWithStation proves Handle rejects a
+// request whose OCPP version doesn't match the Station's configured
+// version, instead of registering a handler for an action the CSMS can
+// never legally send under this Station's negotiated subprotocol.
+func TestHandleRejectsVersionMismatchWithStation(t *testing.T) {
+	st, err := station.New(station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = station.Handle[v201.ResetRequest, v201.ResetConfirmation](st, func(context.Context, v201.ResetRequest) (v201.ResetConfirmation, error) {
+		return v201.ResetConfirmation{}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match station version") {
+		t.Fatalf("error = %v, want a station-version-mismatch error", err)
+	}
+}
+
+// TestHandleRejectsMismatchedRequestConfirmationAction proves Handle
+// rejects a Request/Confirmation pair that share an OCPP version but
+// belong to different actions.
+func TestHandleRejectsMismatchedRequestConfirmationAction(t *testing.T) {
+	st, err := station.New(station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = station.Handle[v16.ResetRequest, v16.HeartbeatConfirmation](st, func(context.Context, v16.ResetRequest) (v16.HeartbeatConfirmation, error) {
+		return v16.HeartbeatConfirmation{}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match confirmation action") {
+		t.Fatalf("error = %v, want a request/confirmation action mismatch error", err)
+	}
+}
+
+// TestStationRejectsMalformedInboundCallPayload proves Handle validates an
+// inbound CALL's payload against the request's Schema before decoding it,
+// so a CSMS that sends a payload missing a required field never reaches the
+// registered handler and instead produces a CALLERROR.
+func TestStationRejectsMalformedInboundCallPayload(t *testing.T) {
+	upgrader := websocket.Upgrader{Subprotocols: []string{string(protocol.OCPP16)}}
+	verified := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		// Deliberately no conn.Close(): closing right after reading the
+		// response would race Run's own return against the assertions
+		// below, the same pitfall TestStationRejectsBinaryFrames avoids by
+		// leaving the connection open past this handler returning.
+		defer close(verified)
+		// ResetRequest requires "type"; this CALL omits it.
+		encoded, err := protocol.Encode(protocol.Call{ID: "1", Action: "Reset", Payload: json.RawMessage(`{}`)})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, encoded); err != nil {
+			return
+		}
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Errorf("reading the station's response: %v", err)
+			return
+		}
+		message, err := protocol.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		callError, ok := message.(protocol.CallError)
+		if !ok || callError.ID != "1" {
+			t.Errorf("response = %#v, want a CALLERROR for id 1", message)
+		}
+	}))
+	defer server.Close()
+
+	dispatched := make(chan struct{}, 1)
+	st, err := station.New(station.Config{URL: wsURL(server.URL), Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := station.Handle(st, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		dispatched <- struct{}{}
+		return v16.ResetConfirmation{Status: v16.ResetConfirmationStatusAccepted}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	waitConnected(t, st)
+
+	select {
+	case <-verified:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server never received the station's CALLERROR response")
+	}
+	select {
+	case <-dispatched:
+		t.Fatal("station dispatched a CALL whose payload fails schema validation")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestStationRejectsInvalidConfirmationFromHandler proves Handle validates
+// a handler's returned confirmation against its Schema before sending it,
+// so a handler bug that produces an invalid confirmation reaches the CSMS
+// as an InternalError CALLERROR instead of a malformed CALLRESULT.
+func TestStationRejectsInvalidConfirmationFromHandler(t *testing.T) {
+	connected := make(chan *csms.Session, 1)
+	server, err := csms.New(csms.Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st := dialStation(t, httpServer.URL, "CP-001", nil)
+	if err := station.Handle(st, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		return v16.ResetConfirmation{}, nil // zero-value Status is not "Accepted" or "Rejected"
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session := <-connected
+	_, err = csms.Call[v16.ResetRequest, v16.ResetConfirmation](
+		context.Background(), session, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+	)
+	var remote *csms.RemoteCallError
+	if !errors.As(err, &remote) {
+		t.Fatalf("error = %v, want a RemoteCallError", err)
+	}
+	if remote.Code != csms.InternalError {
+		t.Fatalf("CALLERROR code = %q, want InternalError", remote.Code)
+	}
+}
+
 func TestCallRejectsGeneratorPanicAndInvalidID(t *testing.T) {
 	connected := make(chan *csms.Session, 1)
 	server, err := csms.New(csms.Config{
