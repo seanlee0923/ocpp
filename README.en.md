@@ -617,6 +617,14 @@ safe for concurrent use and carries no ordering guarantee. Once the queue
 queued — a healthy `Record` implementation never reaches that bound.
 `Server.Shutdown` stops these workers too.
 
+However, if a `Record` implementation blocks forever instead of returning,
+that worker is occupied permanently, permanently reducing the pool's
+effective concurrency by one — unlike a handler's `ctx`, this worker
+goroutine has no separate cancellation/timeout mechanism, so `Record` itself
+must return promptly or enforce its own internal timeout (`Server.Shutdown`
+waits for such a worker until its `ctx` expires, at which point `Shutdown`
+itself returns a timeout error).
+
 Server status is available via `Server.Snapshot()` and `Server.Healthy()`.
 The library does not impose an HTTP endpoint — wire them into whatever route
 your application prefers.
