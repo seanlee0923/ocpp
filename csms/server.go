@@ -646,6 +646,15 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 			s.log(ctx, record)
 			metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), InternalError
 			session.recordMetric(metric)
+			// The CALL was received and routed to a handler, so the
+			// Charging Station is waiting on a matching response — leaving
+			// it silent (unlike every other rejection path in this
+			// function) means it can only ever time out. Best-effort: if
+			// the connection itself is what's broken, this send fails too
+			// and is ignored, same as the other CALLERROR sends below.
+			_ = session.send(ctx, protocol.CallError{
+				ID: call.ID, Code: string(InternalError), Description: "internal error", Details: json.RawMessage(`{}`),
+			})
 			return
 		}
 		record.Level, record.Event = LogDebug, LogCallCompleted
