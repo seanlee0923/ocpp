@@ -703,12 +703,13 @@ func validErrorCode(version protocol.Version, code ErrorCode) bool {
 	case NotImplemented, NotSupported, InternalError, ProtocolError, SecurityError,
 		PropertyConstraintViolation, TypeConstraintViolation, GenericError:
 		return true
+	case formatViolationCode(version), occurrenceConstraintCode(version):
+		return true
 	}
 	if version == protocol.OCPP16 {
-		return code == FormationViolation || code == OccurenceConstraintViolation
+		return false
 	}
-	return code == FormatViolation || code == OccurrenceConstraintViolation ||
-		code == MessageTypeNotSupported || code == RpcFrameworkError
+	return code == MessageTypeNotSupported || code == RpcFrameworkError
 }
 
 func truncateRunes(value string, limit int) string {

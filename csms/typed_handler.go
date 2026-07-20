@@ -116,10 +116,7 @@ func validationErrorCode(version protocol.Version, err error) ErrorCode {
 	case validation.PropertyConstraintError:
 		return PropertyConstraintViolation
 	case validation.OccurrenceConstraintError:
-		if version == protocol.OCPP16 {
-			return OccurenceConstraintViolation
-		}
-		return OccurrenceConstraintViolation
+		return occurrenceConstraintCode(version)
 	case validation.TypeConstraintError:
 		return TypeConstraintViolation
 	default:
@@ -127,11 +124,26 @@ func validationErrorCode(version protocol.Version, err error) ErrorCode {
 	}
 }
 
+// formatViolationCode and occurrenceConstraintCode are the single source of
+// truth for the two error codes OCPP 1.6 spells differently than 2.0.1/2.1:
+// 1.6's original (misspelled) "FormationViolation"/"OccurenceConstraintViolation"
+// vs the corrected "FormatViolation"/"OccurrenceConstraintViolation". Every
+// place that needs to produce or validate one of these two codes for a given
+// version (validationErrorCode above, validErrorCode in server.go) must call
+// through these instead of re-deriving the version check itself — otherwise
+// the two versions of the pair inevitably drift out of sync.
 func formatViolationCode(version protocol.Version) ErrorCode {
 	if version == protocol.OCPP16 {
 		return FormationViolation
 	}
 	return FormatViolation
+}
+
+func occurrenceConstraintCode(version protocol.Version) ErrorCode {
+	if version == protocol.OCPP16 {
+		return OccurenceConstraintViolation
+	}
+	return OccurrenceConstraintViolation
 }
 
 func isNilType[T any](value T) bool {
