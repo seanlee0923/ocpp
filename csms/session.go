@@ -21,6 +21,7 @@ var (
 	ErrIdleTimeout         = errors.New("OCPP session idle timeout")
 	ErrTooManyPendingCalls = errors.New("too many pending OCPP calls")
 	ErrDuplicateUniqueID   = errors.New("duplicate OCPP unique ID")
+	ErrHandlerQueueFull    = errors.New("OCPP handler queue is full")
 )
 
 type SessionState uint32
@@ -56,6 +57,7 @@ type Session struct {
 	ctx               context.Context
 	cancel            context.CancelCauseFunc
 	handlerSlots      chan struct{}
+	pendingSlots      chan struct{}
 	handlerWG         sync.WaitGroup
 	readDone          chan struct{}
 	uniqueIDGenerator func() string
@@ -270,15 +272,34 @@ func publicCloseReason(cause error) (int, string) {
 	}
 }
 
-func (s *Session) startHandler(run func(context.Context)) bool {
+// startHandler admits one inbound CALL/SEND for dispatch. It never blocks:
+// admission only reserves a pendingSlots slot (bounded by
+// Config.MaxQueuedHandlers, sized well above MaxConcurrentHandlers so
+// dispatch keeps up with bursts) and returns immediately, so a saturated
+// Config.MaxConcurrentHandlers can never stall the read loop itself — which
+// also reads this same session's CALLRESULT/CALLERROR for the CSMS's own
+// outbound Call()s. Actually waiting for a free handlerSlots slot happens
+// inside the spawned goroutine instead. Returns nil once admitted,
+// ErrHandlerQueueFull if pendingSlots is already full (the caller should
+// reject this one message, not the session), or the session's closing
+// cause if the session is already done (the caller should stop reading).
+func (s *Session) startHandler(run func(context.Context)) error {
 	select {
-	case s.handlerSlots <- struct{}{}:
+	case s.pendingSlots <- struct{}{}:
 	case <-s.ctx.Done():
-		return false
+		return context.Cause(s.ctx)
+	default:
+		return ErrHandlerQueueFull
 	}
 	s.handlerWG.Add(1)
 	go func() {
 		defer s.handlerWG.Done()
+		defer func() { <-s.pendingSlots }()
+		select {
+		case s.handlerSlots <- struct{}{}:
+		case <-s.ctx.Done():
+			return
+		}
 		defer func() { <-s.handlerSlots }()
 		// A per-call bound, not just s.ctx directly: s.ctx is only
 		// canceled when the whole session ends, so without this a
@@ -294,7 +315,7 @@ func (s *Session) startHandler(run func(context.Context)) bool {
 		}
 		run(ctx)
 	}()
-	return true
+	return nil
 }
 
 func (s *Session) waitHandlers(ctx context.Context) error {

@@ -80,18 +80,27 @@ type Config struct {
 	CallTimeout           time.Duration
 	MaxPendingCalls       int
 	MaxConcurrentHandlers int
-	UniqueIDGenerator     UniqueIDGenerator
-	OnDuplicateSession    DuplicateSessionHandler
-	WriteTimeout          time.Duration
-	PingInterval          time.Duration
-	PongTimeout           time.Duration
-	IdleTimeout           time.Duration
-	CheckOrigin           func(*http.Request) bool
-	OnConnect             func(*Session)
-	OnDisconnect          func(*Session, error)
-	Logger                Logger
-	Metrics               Metrics
-	Security              SecurityConfig
+	// MaxQueuedHandlers bounds how many inbound CALL/SEND messages may be
+	// admitted (running or waiting for a free MaxConcurrentHandlers slot)
+	// at once, per session. Default: 4x MaxConcurrentHandlers. Once full, a
+	// further inbound CALL gets an immediate CALLERROR (GenericError) and a
+	// further inbound SEND is logged and dropped, instead of either
+	// blocking the read loop (which would also stall reading this
+	// session's own outbound Call responses) or admitting an unbounded
+	// number of goroutines waiting for a slot.
+	MaxQueuedHandlers  int
+	UniqueIDGenerator  UniqueIDGenerator
+	OnDuplicateSession DuplicateSessionHandler
+	WriteTimeout       time.Duration
+	PingInterval       time.Duration
+	PongTimeout        time.Duration
+	IdleTimeout        time.Duration
+	CheckOrigin        func(*http.Request) bool
+	OnConnect          func(*Session)
+	OnDisconnect       func(*Session, error)
+	Logger             Logger
+	Metrics            Metrics
+	Security           SecurityConfig
 }
 
 type Server struct {
@@ -153,6 +162,12 @@ func New(config Config) (*Server, error) {
 	}
 	if config.MaxConcurrentHandlers < 0 {
 		return nil, fmt.Errorf("%w: max concurrent handlers must not be negative", ErrInvalidConfiguration)
+	}
+	if config.MaxQueuedHandlers == 0 {
+		config.MaxQueuedHandlers = 4 * config.MaxConcurrentHandlers
+	}
+	if config.MaxQueuedHandlers < 0 {
+		return nil, fmt.Errorf("%w: max queued handlers must not be negative", ErrInvalidConfiguration)
 	}
 	if config.UniqueIDGenerator == nil {
 		config.UniqueIDGenerator = uuid.NewString
@@ -265,6 +280,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx:               sessionContext,
 		cancel:            cancelSession,
 		handlerSlots:      make(chan struct{}, s.config.MaxConcurrentHandlers),
+		pendingSlots:      make(chan struct{}, s.config.MaxQueuedHandlers),
 		readDone:          make(chan struct{}),
 		uniqueIDGenerator: s.config.UniqueIDGenerator,
 		metricQueue:       s.metricQueue,
@@ -557,10 +573,14 @@ func (s *Server) readLoop(session *Session) error {
 		}
 		switch value := message.(type) {
 		case protocol.Call:
-			if !session.startHandler(func(ctx context.Context) {
+			switch err := session.startHandler(func(ctx context.Context) {
 				s.handleCall(ctx, session, value)
-			}) {
-				return context.Cause(session.ctx)
+			}); {
+			case err == nil:
+			case errors.Is(err, ErrHandlerQueueFull):
+				s.rejectQueuedCall(session, value)
+			default:
+				return err
 			}
 		case protocol.Send:
 			if session.version != protocol.OCPP21 {
@@ -573,10 +593,14 @@ func (s *Server) readLoop(session *Session) error {
 				}
 				return fmt.Errorf("SEND is only supported by OCPP 2.1")
 			}
-			if !session.startHandler(func(ctx context.Context) {
+			switch err := session.startHandler(func(ctx context.Context) {
 				s.handleSend(ctx, session, value)
-			}) {
-				return context.Cause(session.ctx)
+			}); {
+			case err == nil:
+			case errors.Is(err, ErrHandlerQueueFull):
+				s.dropQueuedSend(session, value)
+			default:
+				return err
 			}
 		case protocol.CallResult, protocol.CallError:
 			// Unknown IDs are late or unsolicited responses and are ignored.
@@ -585,6 +609,41 @@ func (s *Server) readLoop(session *Session) error {
 			return fmt.Errorf("unexpected inbound message type %d", message.Type())
 		}
 	}
+}
+
+// rejectQueuedCall answers a CALL that arrived while session's handler
+// queue (Config.MaxQueuedHandlers) was already full — an honest CALLERROR
+// instead of either blocking the read loop until room freed up (which
+// would also stall reading this same session's own outbound Call
+// responses) or admitting an unbounded number of goroutines waiting for a
+// free handler slot.
+func (s *Server) rejectQueuedCall(session *Session, call protocol.Call) {
+	record := sessionLogRecord(session, LogWarn, LogCallRejected)
+	record.MessageType, record.MessageID, record.Action, record.ErrorCode, record.Reason =
+		protocol.CallType, call.ID, call.Action, GenericError, "handler_queue_full"
+	s.log(session.Context(), record)
+	session.recordMetric(MetricEvent{
+		Type: MetricCallRejected, Identity: session.identity, Version: session.version,
+		MessageType: protocol.CallType, Action: call.Action, ErrorCode: GenericError,
+	})
+	_ = session.send(session.Context(), protocol.CallError{
+		ID: call.ID, Code: string(GenericError), Description: "too many pending calls", Details: json.RawMessage(`{}`),
+	})
+}
+
+// dropQueuedSend is rejectQueuedCall's SEND counterpart: SEND is
+// unconfirmed, so there's no response to send back — this only logs and
+// records the drop, matching how an unregistered SEND action is already
+// handled.
+func (s *Server) dropQueuedSend(session *Session, send protocol.Send) {
+	record := sessionLogRecord(session, LogWarn, LogSendDropped)
+	record.MessageType, record.MessageID, record.Action, record.Reason =
+		protocol.SendType, send.ID, send.Action, "handler_queue_full"
+	s.log(session.Context(), record)
+	session.recordMetric(MetricEvent{
+		Type: MetricSendDropped, Identity: session.identity, Version: session.version,
+		MessageType: protocol.SendType, Action: send.Action,
+	})
 }
 
 func (s *Server) handleSend(ctx context.Context, session *Session, send protocol.Send) {
