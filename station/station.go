@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -134,6 +135,9 @@ func (config Config) validate() error {
 	if config.Version == "" {
 		return fmt.Errorf("station: Version is required")
 	}
+	if !config.Version.Valid() {
+		return fmt.Errorf("station: unsupported OCPP version %q", config.Version)
+	}
 	if config.CallTimeout < 0 {
 		return fmt.Errorf("station: CallTimeout must not be negative")
 	}
@@ -152,8 +156,13 @@ func (config Config) validate() error {
 	if config.WriteTimeout < 0 {
 		return fmt.Errorf("station: WriteTimeout must not be negative")
 	}
-	if config.ReconnectPolicy != nil && (config.ReconnectPolicy.InitialDelay < 0 || config.ReconnectPolicy.MaxDelay < 0) {
-		return fmt.Errorf("station: ReconnectPolicy delays must not be negative")
+	if config.ReconnectPolicy != nil {
+		if config.ReconnectPolicy.InitialDelay < 0 || config.ReconnectPolicy.MaxDelay < 0 {
+			return fmt.Errorf("station: ReconnectPolicy delays must not be negative")
+		}
+		if multiplier := config.ReconnectPolicy.Multiplier; math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
+			return fmt.Errorf("station: ReconnectPolicy.Multiplier must not be NaN or infinite")
+		}
 	}
 	return nil
 }

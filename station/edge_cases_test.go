@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
@@ -24,12 +25,21 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"empty URL":                      func(c station.Config) station.Config { c.URL = ""; return c },
 		"empty identity":                 func(c station.Config) station.Config { c.Identity = ""; return c },
 		"empty version":                  func(c station.Config) station.Config { c.Version = ""; return c },
+		"unsupported version":            func(c station.Config) station.Config { c.Version = protocol.Version("ocpp9.9"); return c },
 		"negative CallTimeout":           func(c station.Config) station.Config { c.CallTimeout = -time.Second; return c },
 		"negative MaxPendingCalls":       func(c station.Config) station.Config { c.MaxPendingCalls = -1; return c },
 		"negative MaxConcurrentHandlers": func(c station.Config) station.Config { c.MaxConcurrentHandlers = -1; return c },
 		"negative HandshakeTimeout":      func(c station.Config) station.Config { c.HandshakeTimeout = -time.Second; return c },
 		"negative reconnect delay": func(c station.Config) station.Config {
 			c.ReconnectPolicy = &station.ReconnectPolicy{InitialDelay: -time.Second}
+			return c
+		},
+		"NaN reconnect multiplier": func(c station.Config) station.Config {
+			c.ReconnectPolicy = &station.ReconnectPolicy{InitialDelay: time.Second, Multiplier: math.NaN()}
+			return c
+		},
+		"infinite reconnect multiplier": func(c station.Config) station.Config {
+			c.ReconnectPolicy = &station.ReconnectPolicy{InitialDelay: time.Second, Multiplier: math.Inf(1)}
 			return c
 		},
 	}
