@@ -671,3 +671,64 @@ func TestStationEscapesIdentityInDialURL(t *testing.T) {
 		t.Fatal("CSMS never observed a connection")
 	}
 }
+
+// TestStationRejectsBinaryFrames proves the Station's read loop only
+// accepts WebSocket text frames, matching csms.Server's own check
+// (server.go's readLoop). Before this fix, readLoop discarded the frame
+// type entirely, so a CALL delivered inside a binary frame — which OCPP-J
+// never sends deliberately, but which the WebSocket protocol otherwise
+// allows — would have been dispatched exactly like a normal text-framed
+// one instead of being treated as a protocol violation.
+func TestStationRejectsBinaryFrames(t *testing.T) {
+	upgrader := websocket.Upgrader{Subprotocols: []string{string(protocol.OCPP16)}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		// Deliberately no conn.Close() and no read loop of its own: a
+		// hijacked WebSocket connection outlives this handler returning,
+		// so the connection stays open on its own past this point,
+		// letting the assertions below tell a real rejection (an error
+		// naming text messages) apart from an unrelated closed-connection
+		// error that any dropped connection would also produce.
+		data, err := protocol.Encode(protocol.Call{ID: "1", Action: "Reset", Payload: json.RawMessage(`{"type":"Soft"}`)})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.WriteMessage(websocket.BinaryMessage, data)
+	}))
+	defer server.Close()
+
+	dispatched := make(chan struct{}, 1)
+	st, err := station.New(station.Config{URL: wsURL(server.URL), Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := station.Handle(st, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		dispatched <- struct{}{}
+		return v16.ResetConfirmation{Status: v16.ResetConfirmationStatusAccepted}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- st.Run(context.Background()) }()
+	// Only st.Stop(), not also draining runDone here: whichever branch of
+	// the select below fires already accounts for runDone's one buffered
+	// slot, so a second read here would block forever if the "dispatched"
+	// branch fired instead (Run may not have returned, or may return
+	// after this cleanup already moved on).
+	t.Cleanup(st.Stop)
+
+	select {
+	case <-dispatched:
+		t.Fatal("station dispatched a CALL delivered inside a binary frame")
+	case err := <-runDone:
+		if err == nil || !strings.Contains(err.Error(), "text messages") {
+			t.Fatalf("Run error = %v, want an error naming text messages (not just any connection failure)", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("station neither dispatched the CALL nor rejected the binary frame in time")
+	}
+}

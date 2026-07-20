@@ -588,9 +588,12 @@ func (s *Station) runConnection(ctx context.Context, conn *stationConn) error {
 
 func (s *Station) readLoop(conn *stationConn) error {
 	for {
-		_, data, err := conn.conn.ReadMessage()
+		messageType, data, err := conn.conn.ReadMessage()
 		if err != nil {
 			return err
+		}
+		if messageType != websocket.TextMessage {
+			return fmt.Errorf("OCPP only accepts WebSocket text messages")
 		}
 		message, err := protocol.Decode(data)
 		if err != nil {
