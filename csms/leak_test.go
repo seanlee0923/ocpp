@@ -178,6 +178,40 @@ func TestShutdownStopsMetricDispatchWorkers(t *testing.T) {
 	waitForGoroutineBudget(t, baseline, 2)
 }
 
+// TestShutdownReturnsCtxErrIfMetricWorkersDoNotExit proves Shutdown gives
+// up and returns ctx's error, instead of blocking forever, if a metric
+// dispatch worker is stuck inside a hung Metrics.Record call and so never
+// notices the stop signal — the complement of
+// TestShutdownStopsMetricDispatchWorkers, which only exercises the case
+// where every worker exits promptly.
+func TestShutdownReturnsCtxErrIfMetricWorkersDoNotExit(t *testing.T) {
+	block := make(chan struct{}) // never closed: Record blocks forever
+	server, err := New(Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		Metrics:   MetricsFunc(func(context.Context, MetricEvent) { <-block }),
+		OnConnect: func(*Session) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	defer close(block)
+
+	// Connecting fires MetricSessionConnected, so at least one of the
+	// metricDispatchWorkers pool goroutines is guaranteed to pick it up
+	// and hang inside Record.
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
+	defer conn.Close()
+	waitForSession(t, server, "CP-001")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := server.Shutdown(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Shutdown error = %v, want context.DeadlineExceeded", err)
+	}
+}
+
 func waitForGoroutineBudget(t *testing.T, baseline, allowance int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

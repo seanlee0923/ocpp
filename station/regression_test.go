@@ -142,6 +142,47 @@ func TestStationCallErrorIsNormalizedBeforeSend(t *testing.T) {
 	}
 }
 
+// TestStationCallErrorPassesThroughAlreadyValidFields proves
+// normalizeCallError leaves an already wire-valid *CallError's fields
+// untouched: a description short enough to need no truncating, and nil
+// Details (which becomes "{}", not some other placeholder) — the
+// complement of TestStationCallErrorIsNormalizedBeforeSend, which only
+// exercises the fields that need fixing.
+func TestStationCallErrorPassesThroughAlreadyValidFields(t *testing.T) {
+	connected := make(chan *csms.Session, 1)
+	server, err := csms.New(csms.Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	st := dialStation(t, httpServer.URL, "CP-001", nil)
+	if err := station.Handle(st, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		return v16.ResetConfirmation{}, &station.CallError{Code: "NotSupported", Description: "short"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session := <-connected
+	_, err = csms.Call[v16.ResetRequest, v16.ResetConfirmation](
+		context.Background(), session, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+	)
+	var remote *csms.RemoteCallError
+	if !errors.As(err, &remote) {
+		t.Fatalf("error = %v, want a RemoteCallError", err)
+	}
+	if remote.Code != "NotSupported" || remote.Description != "short" {
+		t.Fatalf("CALLERROR = %+v, want an already-valid Code/Description passed through unchanged", remote)
+	}
+	if string(remote.Details) != "{}" {
+		t.Fatalf("CALLERROR details = %s, want {} for nil Details", remote.Details)
+	}
+}
+
 func TestNewHandleRejectsDuplicateRegistration(t *testing.T) {
 	st, err := station.New(station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16})
 	if err != nil {
