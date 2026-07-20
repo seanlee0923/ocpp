@@ -25,7 +25,7 @@ func TestTypedHandlerValidatesDecodesAndValidatesResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, ok := router.lookup(protocol.OCPP16, "BootNotification")
+	handler, ok := router.lookup(protocol.OCPP16, "BootNotification", callKind)
 	if !ok {
 		t.Fatal("typed handler was not registered")
 	}
@@ -50,7 +50,7 @@ func TestTypedHandlerClassifiesPayloadConstraintViolations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, _ := router.lookup(protocol.OCPP16, "BootNotification")
+	handler, _ := router.lookup(protocol.OCPP16, "BootNotification", callKind)
 	tests := []struct {
 		name string
 		raw  string
@@ -113,7 +113,7 @@ func TestTypedHandlerRejectsInvalidConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, _ := router.lookup(protocol.OCPP16, "BootNotification")
+	handler, _ := router.lookup(protocol.OCPP16, "BootNotification", callKind)
 	_, err = handler(context.Background(), nil, json.RawMessage(`{"chargePointVendor":"Example","chargePointModel":"AC-22K"}`))
 	var callError *CallError
 	if !errors.As(err, &callError) || callError.Code != InternalError {

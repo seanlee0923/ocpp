@@ -47,7 +47,7 @@ func TestRouterHandleRejectsDuplicateWithoutReplacing(t *testing.T) {
 	if err := router.Handle(protocol.OCPP16, "Heartbeat", second); !errors.Is(err, ErrHandlerAlreadyRegistered) {
 		t.Fatalf("duplicate error = %v", err)
 	}
-	handler, ok := router.lookup(protocol.OCPP16, "Heartbeat")
+	handler, ok := router.lookup(protocol.OCPP16, "Heartbeat", callKind)
 	if !ok {
 		t.Fatal("original handler not found")
 	}
@@ -74,7 +74,7 @@ func TestRouterZeroValueIsUsable(t *testing.T) {
 	if err := router.Handle(protocol.OCPP16, "Heartbeat", handler); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := router.lookup(protocol.OCPP16, "Heartbeat"); !ok {
+	if _, ok := router.lookup(protocol.OCPP16, "Heartbeat", callKind); !ok {
 		t.Fatal("zero-value router did not retain handler")
 	}
 }
@@ -92,7 +92,7 @@ func TestRouterMiddlewareRunsOutsideLock(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() {
-		_, _ = router.lookup(protocol.OCPP16, "Heartbeat")
+		_, _ = router.lookup(protocol.OCPP16, "Heartbeat", callKind)
 		close(done)
 	}()
 	select {
@@ -110,7 +110,7 @@ func TestRouterRejectsMiddlewareThatReturnsNilHandler(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := router.lookup(protocol.OCPP16, "Heartbeat"); ok {
+	if _, ok := router.lookup(protocol.OCPP16, "Heartbeat", callKind); ok {
 		t.Fatal("nil middleware result was returned as an executable handler")
 	}
 }

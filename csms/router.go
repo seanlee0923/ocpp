@@ -20,9 +20,25 @@ type Handler func(context.Context, *Session, json.RawMessage) (any, error)
 
 type Middleware func(protocol.Version, string, Handler) Handler
 
+// messageKind distinguishes a CALL-answering registration from a SEND
+// (fire-and-forget) one, so a CALL frame can never reach a SEND-only
+// handler (whose result is meaningless as a CALLRESULT) and a SEND frame
+// can never reach a CALL handler (silently discarding its confirmation).
+type messageKind int
+
+const (
+	callKind messageKind = iota
+	sendKind
+)
+
+type routerEntry struct {
+	handler Handler
+	kind    messageKind
+}
+
 type Router struct {
 	mu         sync.RWMutex
-	handlers   map[protocol.Version]map[string]Handler
+	handlers   map[protocol.Version]map[string]routerEntry
 	middleware []Middleware
 }
 
@@ -38,13 +54,26 @@ func (r *Router) Use(middleware Middleware) {
 }
 
 func NewRouter() *Router {
-	return &Router{handlers: make(map[protocol.Version]map[string]Handler)}
+	return &Router{handlers: make(map[protocol.Version]map[string]routerEntry)}
 }
 
-// Handle registers a new handler for version and action. A registration is
-// immutable: duplicate keys are rejected instead of silently replacing the
-// existing handler.
+// Handle registers a new CALL-answering handler for version and action. A
+// registration is immutable: duplicate keys are rejected instead of
+// silently replacing the existing handler. Only a CALL frame can reach a
+// handler registered this way — use HandleSend to register a handler for
+// SEND (fire-and-forget) frames instead.
 func (r *Router) Handle(version protocol.Version, action string, handler Handler) error {
+	return r.register(version, action, handler, callKind)
+}
+
+// HandleSend registers a new SEND (fire-and-forget) handler for version and
+// action, following the same immutability rule as Handle. Only a SEND frame
+// can reach a handler registered this way.
+func (r *Router) HandleSend(version protocol.Version, action string, handler Handler) error {
+	return r.register(version, action, handler, sendKind)
+}
+
+func (r *Router) register(version protocol.Version, action string, handler Handler, kind messageKind) error {
 	if r == nil {
 		return fmt.Errorf("%w: router is nil", ErrInvalidHandlerRegistration)
 	}
@@ -59,29 +88,33 @@ func (r *Router) Handle(version protocol.Version, action string, handler Handler
 	}
 	r.mu.Lock()
 	if r.handlers == nil {
-		r.handlers = make(map[protocol.Version]map[string]Handler)
+		r.handlers = make(map[protocol.Version]map[string]routerEntry)
 	}
 	defer r.mu.Unlock()
 	if r.handlers[version] == nil {
-		r.handlers[version] = make(map[string]Handler)
+		r.handlers[version] = make(map[string]routerEntry)
 	}
 	if _, exists := r.handlers[version][action]; exists {
 		return fmt.Errorf("%w for %s %s", ErrHandlerAlreadyRegistered, version, action)
 	}
-	r.handlers[version][action] = handler
+	r.handlers[version][action] = routerEntry{handler: handler, kind: kind}
 	return nil
 }
 
-func (r *Router) lookup(version protocol.Version, action string) (Handler, bool) {
+// lookup finds the handler registered for version and action, but only if
+// it was registered for the requested kind (CALL vs SEND) — a CALL frame
+// can never dispatch to a SEND-only handler and vice versa.
+func (r *Router) lookup(version protocol.Version, action string, kind messageKind) (Handler, bool) {
 	if r == nil {
 		return nil, false
 	}
 	r.mu.RLock()
-	handler, ok := r.handlers[version][action]
-	if !ok {
+	entry, ok := r.handlers[version][action]
+	if !ok || entry.kind != kind {
 		r.mu.RUnlock()
 		return nil, false
 	}
+	handler := entry.handler
 	middleware := append([]Middleware(nil), r.middleware...)
 	r.mu.RUnlock()
 	for index := len(middleware) - 1; index >= 0; index-- {

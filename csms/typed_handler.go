@@ -34,7 +34,7 @@ func HandleSend[Request protocol.Payload](router *Router, handler TypedSendHandl
 		return fmt.Errorf("%w: SEND handler requires a non-pointer generated request payload", ErrInvalidHandlerRegistration)
 	}
 	version, action := request.Version(), request.ActionName()
-	return router.Handle(version, action, func(ctx context.Context, session *Session, raw json.RawMessage) (any, error) {
+	return router.HandleSend(version, action, func(ctx context.Context, session *Session, raw json.RawMessage) (any, error) {
 		if err := request.ValidateJSON(raw); err != nil {
 			return nil, err
 		}

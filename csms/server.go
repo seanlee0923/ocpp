@@ -588,7 +588,7 @@ func (s *Server) handleSend(ctx context.Context, session *Session, send protocol
 	s.log(ctx, record)
 	metric.Type = MetricSendReceived
 	session.recordMetric(metric)
-	handler, ok := s.config.Router.lookup(session.version, send.Action)
+	handler, ok := s.config.Router.lookup(session.version, send.Action, sendKind)
 	if !ok {
 		record.Level, record.Event, record.Reason = LogWarn, LogSendDropped, "action_not_registered"
 		s.log(ctx, record)
@@ -630,7 +630,7 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 	s.log(ctx, record)
 	metric.Type = MetricCallReceived
 	session.recordMetric(metric)
-	handler, ok := s.config.Router.lookup(session.version, call.Action)
+	handler, ok := s.config.Router.lookup(session.version, call.Action, callKind)
 	if !ok {
 		record.Level, record.Event, record.ErrorCode, record.Reason = LogWarn, LogCallRejected, NotImplemented, "action_not_registered"
 		s.log(ctx, record)

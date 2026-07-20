@@ -152,7 +152,7 @@ func TestHandlerPanicEmitsCallRejectedMetric(t *testing.T) {
 
 func TestSendDroppedEmitsMetric(t *testing.T) {
 	router := NewRouter()
-	if err := router.Handle(protocol.OCPP21, "NotifyDisplayMessages", func(context.Context, *Session, json.RawMessage) (any, error) {
+	if err := router.HandleSend(protocol.OCPP21, "NotifyDisplayMessages", func(context.Context, *Session, json.RawMessage) (any, error) {
 		return nil, errors.New("boom")
 	}); err != nil {
 		t.Fatal(err)

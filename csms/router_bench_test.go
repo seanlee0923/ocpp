@@ -29,7 +29,7 @@ func BenchmarkRouterLookup(b *testing.B) {
 			}
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				if _, ok := router.lookup(protocol.OCPP16, "Heartbeat"); !ok {
+				if _, ok := router.lookup(protocol.OCPP16, "Heartbeat", callKind); !ok {
 					b.Fatal("handler not found")
 				}
 			}

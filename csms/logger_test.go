@@ -67,7 +67,7 @@ func TestStructuredLoggerReceivesProtocolMetadata(t *testing.T) {
 func TestSendSuccessLogsCompletionWithoutWireResponse(t *testing.T) {
 	router := NewRouter()
 	handled := make(chan struct{}, 1)
-	router.Handle(protocol.OCPP21, "NotifyDisplayMessages", func(context.Context, *Session, json.RawMessage) (any, error) {
+	router.HandleSend(protocol.OCPP21, "NotifyDisplayMessages", func(context.Context, *Session, json.RawMessage) (any, error) {
 		handled <- struct{}{}
 		return nil, nil
 	})
