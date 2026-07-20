@@ -15,10 +15,11 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   CALL/SEND, outbound `csms.Call`의 각 단계(전송, 완료, 실패, timeout, 취소,
   `MaxPendingCalls` 초과 거부)를 identity, OCPP version, message type,
   Action, 소요 시간, error code로 관측한다. `Logger`와 동일하게 panic이
-  프로토콜 서버에 영향을 주지 않는다. `Record`는 이벤트마다 별도 goroutine에서
-  dispatch되어 느리거나 멈춘 구현체도 handler 처리나 outbound `csms.Call`의
-  취소 응답성을 지연시키지 않는다(대신 `Record`는 동시 호출 안전성이 필요하고
-  순서를 보장하지 않으며, 동시 dispatch 상한 초과 시 이벤트가 드롭된다).
+  프로토콜 서버에 영향을 주지 않는다. `Record`는 `Server`당 고정된 개수의 워커 goroutine이 공유 큐를 소비하며
+  dispatch되어 호출자를 절대 블로킹하지 않는다 — 느리거나 멈춘 구현체도
+  handler 처리나 outbound `csms.Call`의 취소 응답성을 지연시키지 않는다(대신
+  `Record`는 동시 호출 안전성이 필요하고 순서를 보장하지 않으며, 큐가 가득 차면
+  이벤트가 드롭된다). `Server.Shutdown`을 호출하면 이 워커들도 함께 정지한다.
   `Record`에는 항상 `context.Background()`가 전달된다 — 원래 컨텍스트를
   전달하면 timeout/cancel/shutdown을 보고하는 이벤트가 정확히 그 컨텍스트가
   이미 취소된 상태라, `ctx.Err() != nil`이면 아무 것도 안 하는 방어적
@@ -60,6 +61,15 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   `Config.TLSConfig`로 설정한다. 여러 charger 운영은 호출자 책임(자체
   `map[string]*station.Station` 관리) — 이 패키지는 프로토콜/세션 동작만
   다룬다. [`examples/station-client`](examples/station-client) 예제 추가.
+- `ocpp-go`의 생성 타입 365개가 공식 OCA JSON Schema와 실제로 일치하는지
+  누구나 독립적으로 재검증할 수 있도록, from-scratch generator인
+  [`ocpp-schema-gen`](https://github.com/seanlee0923/ocpp-schema-gen)을
+  README "OCA Schema 출처" 절에 링크했다.
+- handler/hook 관련 문서(`docs/handlers.md`, `docs/sessions.md`,
+  `docs/security.md`, README)에 "`ctx` 취소는 신호일 뿐 강제 종료가 아니며,
+  handler/hook은 반드시 빠르게 반환해야 한다"는 계약을 명시했다. `OnConnect`/
+  `OnDisconnect`/`OnDuplicateSession`, `Authenticator`/`HandshakeLimiter`,
+  `Metrics.Record`가 각각 멈췄을 때 정확히 어디까지 영향을 주는지도 정리했다.
 
 ### Fixed
 
@@ -75,6 +85,49 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
 - `golangci-lint` 도입 과정에서 드러난 사용하지 않는 함수(`hasSupportedSubprotocol`)를
   제거하고, `TestIPRateLimiter`의 의도치 않게 동일했던 `||` 조건식을 두 개의
   개별 assertion으로 분리했다(동작 자체는 원래도 올바랐음).
+- `csms.Call[Request, *Confirmation]`처럼 confirmation 타입 인자에 포인터를
+  넘기면 panic하던 결함을 `isNilType` 가드로 막아 등록 시점 오류로 바꿨다.
+- `Router`가 CALL과 SEND로 등록된 handler를 구분하지 않던 결함을 수정했다 —
+  충전기가 잘못된 메시지 타입으로 보내면 CALL이 영원히 응답받지 못하거나,
+  계산된 confirmation이 조용히 버려질 수 있었다.
+- CALL handler의 confirmation이 인코딩에 실패하면 응답 없이 조용히 끊기던
+  것을, `InternalError` CALLERROR를 보내도록 수정했다.
+- JSON pre-validator의 재귀 깊이에 상한(64)을 둬, 깊게 중첩된 payload로 인한
+  스택 소진을 방지했다.
+- inbound handler 실행 시간을 `Config.CallTimeout` 기준으로 bound했다 —
+  이전에는 세션이 끊기거나 서버가 shutdown될 때만 취소됐다.
+- `IPRateLimiter`가 추적하는 client 수에 상한(1024)을 두고 초과 시 가장 오래된
+  항목을 evict하도록 했다 — 이전에는 서로 다른 IP가 계속 연결을 시도하면
+  메모리가 무제한으로 늘어났다.
+- 연결 activate가 경합에서 진 경우 shutdown 원인이 실제 원인 대신 일반 에러로
+  기록되던 결함, 그리고 disconnect 사유를 `readLoop`의 raw 에러 대신 먼저
+  기록된 진짜 원인(`Session.Err()`)에서 가져오지 않던 결함을 수정했다.
+- read loop가 handler 동시 실행 슬롯이 가득 찼을 때 함께 블로킹되던 결함을
+  논블로킹 admission(`pendingSlots`)으로 전환해 수정했다 — 가득 차면 CALL을
+  즉시 거부한다(`ErrHandlerQueueFull`).
+- `station.dispatch`가 inbound CALL마다 무제한으로 goroutine을 spawn하던 것을
+  csms와 동일한 bounded pending queue로 전환했다.
+- `station`의 outbound 전송에 실제 socket write deadline(`Config.WriteTimeout`,
+  기본 10초)을 적용했다 — 이전에는 `ctx` timeout이 블로킹된 write 자체를
+  풀어주지 못했다.
+- `station`에서 handler가 반환한 `CallError`를 전송 전에 정규화(빈 필드 보정,
+  길이 제한)하고, handler 실행 시간을 `Config.CallTimeout`으로 bound했다.
+- `station.Server.Shutdown`이 metric dispatch 워커까지 기다렸다가 종료하도록
+  수정했다(이전에는 워커가 종료 대상에서 누락돼 있었다).
+- `station`이 텍스트가 아닌 WebSocket 프레임(바이너리 등)을 거부하도록 했다 —
+  OCPP-J는 텍스트 프레임만 허용한다.
+- `station`이 파싱할 수 없는 프레임을 무시하고 계속 읽던 것을, csms와 동일하게
+  연결을 끊도록 수정했다.
+- `station.New`의 설정 검증에 `Version.Valid()` 체크와
+  `ReconnectPolicy.Multiplier`의 NaN/Inf 체크를 추가했다.
+
+### Changed
+
+- CALLERROR 코드 산출 로직을 OCPP 버전별로 흩어져 있던 것에서 공유 헬퍼로
+  통합했다(동작 변경 없음, 유지보수성 개선).
+- `Metrics.Record` dispatch 방식을 이벤트마다 별도 goroutine을 spawn하던 것에서
+  `Server`당 고정된 워커 풀이 공유 큐를 소비하는 방식으로 바꿨다(위 Added 항목의
+  설명도 갱신했다). 외부에서 관측 가능한 동작은 동일하다.
 
 ## [0.1.0] - 2026-07-18
 

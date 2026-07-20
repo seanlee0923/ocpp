@@ -17,11 +17,12 @@ the same major version.
   `MaxPendingCalls` was reached), carrying identity, OCPP version, message
   type, Action, elapsed time, and error code. A panicking implementation
   never affects the protocol server, matching `Logger`. `Record` is
-  dispatched on its own goroutine per event, so a slow or hung
+  dispatched by a fixed pool of worker goroutines per `Server`, shared
+  through a queue, so it never blocks the caller — a slow or hung
   implementation never delays handler processing or an outbound
   `csms.Call`'s cancellation responsiveness (in exchange, `Record` must be
-  concurrency-safe, is not strictly ordered, and events are dropped past a
-  fixed concurrent-dispatch bound). `Record` always receives
+  concurrency-safe, is not strictly ordered, and events are dropped once the
+  queue is full). `Server.Shutdown` stops these workers too. `Record` always receives
   `context.Background()` — propagating the originating context would let a
   Metrics implementation that defensively no-ops on an already-canceled ctx
   silently drop exactly the events that report a timeout, cancellation, or
@@ -68,6 +69,16 @@ the same major version.
   `map[string]*station.Station`) — this package only owns protocol/session
   mechanics. Added the [`examples/station-client`](examples/station-client)
   example.
+- Linked [`ocpp-schema-gen`](https://github.com/seanlee0923/ocpp-schema-gen),
+  a from-scratch generator, from the README's "OCA Schema source" section,
+  so anyone can independently re-verify that `ocpp-go`'s 365 generated types
+  actually match the official OCA JSON Schema.
+- Documented, across `docs/handlers.md`, `docs/sessions.md`,
+  `docs/security.md`, and the README, the contract that "`ctx` cancellation
+  is a signal, not a forced termination, and handlers/hooks must return
+  promptly." Spells out exactly how far the impact reaches when
+  `OnConnect`/`OnDisconnect`/`OnDuplicateSession`,
+  `Authenticator`/`HandshakeLimiter`, or `Metrics.Record` each hang.
 
 ### Fixed
 
@@ -85,6 +96,55 @@ the same major version.
   adopting `golangci-lint`, and split an unintentionally identical `||`
   condition in `TestIPRateLimiter` into two separate assertions (the
   behavior itself was already correct).
+- Guarded `csms.Call[Request, *Confirmation]` against a pointer-typed
+  confirmation type argument, which used to panic; it is now a
+  registration-time error (`isNilType` guard).
+- Fixed `Router` not distinguishing between handlers registered for CALL vs.
+  SEND — a Charging Station sending the wrong message type for an action
+  could leave a CALL permanently unanswered, or silently discard a computed
+  confirmation.
+- A CALL handler's confirmation failing to encode used to close the
+  connection silently with no response; it now sends an `InternalError`
+  CALLERROR.
+- Bounded the JSON pre-validator's recursion depth (64), preventing stack
+  exhaustion from a deeply nested payload.
+- Bounded inbound handler execution time to `Config.CallTimeout` — previously
+  it was only canceled when the session closed or the server shut down.
+- Capped the number of clients `IPRateLimiter` tracks (1024), evicting the
+  oldest entry once the cap is reached — previously an unbounded number of
+  distinct IPs attempting to connect grew memory without limit.
+- Fixed the shutdown cause being recorded as a generic error instead of the
+  real one when connection activation lost a race, and fixed the disconnect
+  reason being read from `readLoop`'s raw error instead of the first cause
+  actually recorded (`Session.Err()`).
+- Fixed the read loop blocking whenever the handler concurrency slots were
+  full; admission is now non-blocking (`pendingSlots`) and rejects the CALL
+  immediately once full (`ErrHandlerQueueFull`).
+- Switched `station.dispatch` from spawning an unbounded goroutine per
+  inbound CALL to the same bounded pending queue csms uses.
+- Applied a real socket write deadline to `station`'s outbound sends
+  (`Config.WriteTimeout`, default 10s) — previously a `ctx` timeout alone
+  could not unblock an already-blocked write.
+- `station` now normalizes a handler-returned `CallError` before sending it
+  (filling empty fields, enforcing length limits) and bounds handler
+  execution time to `Config.CallTimeout`.
+- Fixed `station.Server.Shutdown` not waiting for metric dispatch workers to
+  exit before returning.
+- `station` now rejects non-text WebSocket frames (e.g. binary) — OCPP-J
+  only allows text frames.
+- `station` now disconnects on an unparseable frame instead of silently
+  ignoring it and continuing to read, matching csms's behavior.
+- Added `Version.Valid()` and `ReconnectPolicy.Multiplier` NaN/Inf checks to
+  `station.New`'s config validation.
+
+### Changed
+
+- Consolidated CALLERROR code derivation, previously scattered per OCPP
+  version, into shared helpers (no behavior change, easier to maintain).
+- Changed `Metrics.Record` dispatch from spawning a goroutine per event to a
+  fixed worker pool per `Server` consuming a shared queue (the Added entry
+  above reflects the updated description). Externally observable behavior
+  is unchanged.
 
 ## [0.1.0] - 2026-07-18
 
