@@ -276,8 +276,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return conn.SetReadDeadline(time.Now().Add(session.pongTimeout))
 		})
 	}
-	if !s.activateReservation(identity, reservation, session) {
-		_ = session.Close()
+	if err := s.activateReservation(identity, reservation, session); err != nil {
+		_ = session.closeWithError(err)
 		return
 	}
 	if previous != nil {
@@ -486,12 +486,15 @@ func (s *Server) releaseReservation(identity string, token uint64) {
 	}
 }
 
-func (s *Server) activateReservation(identity string, token uint64, session *Session) bool {
+// activateReservation returns nil on success, or the reason the reservation
+// could not be activated so the caller can close session with that exact
+// cause (e.g. ErrServerShutdown) rather than a generic one.
+func (s *Server) activateReservation(identity string, token uint64, session *Session) error {
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
 	entry := s.sessions[identity]
 	if entry == nil || entry.reservation != token {
-		return false
+		return ErrSessionClosed
 	}
 	if s.shuttingDown.Load() {
 		if entry.session == nil {
@@ -499,11 +502,11 @@ func (s *Server) activateReservation(identity string, token uint64, session *Ses
 		} else {
 			entry.reservation = 0
 		}
-		return false
+		return ErrServerShutdown
 	}
 	entry.session = session
 	entry.reservation = 0
-	return true
+	return nil
 }
 
 func (s *Server) unregisterSession(session *Session) {
