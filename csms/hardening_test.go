@@ -13,6 +13,37 @@ import (
 	"github.com/seanlee0923/ocpp/v16"
 )
 
+// TestOnConnectPanicDoesNotLeakSession proves a panicking OnConnect
+// callback still lets ServeHTTP finish its cleanup sequence — waiting for
+// the read loop, closing the session, unregistering it, and calling
+// OnDisconnect — instead of the panic skipping everything after OnConnect
+// and leaving the session (and its pingLoop/idleLoop/readLoop goroutines)
+// registered forever.
+func TestOnConnectPanicDoesNotLeakSession(t *testing.T) {
+	disconnected := make(chan struct{}, 1)
+	server, err := New(Config{
+		Versions:     []protocol.Version{protocol.OCPP16},
+		OnConnect:    func(*Session) { panic("boom") },
+		OnDisconnect: func(*Session, error) { disconnected <- struct{}{} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := newTestHTTPServer(t, server)
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
+	waitForSession(t, server, "CP-001")
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		t.Fatal("OnDisconnect was not called after OnConnect panicked")
+	}
+	waitForNoSession(t, server, "CP-001")
+}
+
 func TestOnConnectCanPerformBlockingCall(t *testing.T) {
 	callResult := make(chan error, 1)
 	server, err := New(Config{

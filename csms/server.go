@@ -328,9 +328,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		readResult <- s.readLoop(session)
 		close(session.readDone)
 	}()
-	if s.config.OnConnect != nil {
-		s.config.OnConnect(session)
-	}
+	s.callOnConnect(session)
 	err = <-readResult
 	_ = session.closeWithError(err)
 	s.unregisterSession(session)
@@ -343,9 +341,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// session.Err() still holds the real, typed cause that was recorded
 	// first.
 	cause := session.Err()
-	if s.config.OnDisconnect != nil {
-		s.config.OnDisconnect(session, cause)
-	}
+	s.callOnDisconnect(session, cause)
 	record := sessionLogRecord(session, LogInfo, LogSessionDisconnected)
 	record.Reason = disconnectReason(cause)
 	s.log(context.Background(), record)
@@ -353,6 +349,47 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Type: MetricSessionDisconnected, Identity: session.identity, Version: session.version,
 		Duration: time.Since(session.connectedAt),
 	})
+}
+
+// callOnConnect isolates a panicking OnConnect from the rest of
+// ServeHTTP's cleanup sequence. Without this, a panic here (net/http
+// recovers it per-request, so it doesn't take down the server) still skips
+// everything after it in ServeHTTP: readResult is never awaited,
+// closeWithError and unregisterSession never run, and OnDisconnect never
+// fires — the session and its pingLoop/idleLoop/readLoop goroutines leak
+// for the server's remaining lifetime.
+func (s *Server) callOnConnect(session *Session) {
+	if s.config.OnConnect == nil {
+		return
+	}
+	defer func() {
+		if recover() != nil {
+			record := sessionLogRecord(session, LogError, LogSessionConnected)
+			record.Reason = "on_connect_panic"
+			s.log(session.Context(), record)
+		}
+	}()
+	s.config.OnConnect(session)
+}
+
+// callOnDisconnect mirrors callOnConnect: a panicking OnDisconnect must not
+// skip the disconnect log/metric recorded right after it.
+func (s *Server) callOnDisconnect(session *Session, cause error) {
+	if s.config.OnDisconnect == nil {
+		return
+	}
+	defer func() {
+		if recover() != nil {
+			record := sessionLogRecord(session, LogError, LogSessionDisconnected)
+			record.Reason = "on_disconnect_panic"
+			// context.Background(): session.Context() may already be
+			// canceled by the time OnDisconnect runs, for the same reason
+			// the disconnect log a few lines below also uses
+			// context.Background() instead of session.Context().
+			s.log(context.Background(), record)
+		}
+	}()
+	s.config.OnDisconnect(session, cause)
 }
 
 func (s *Server) Session(identity string) (*Session, bool) {
