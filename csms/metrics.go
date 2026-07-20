@@ -2,6 +2,7 @@ package csms
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/seanlee0923/ocpp/protocol"
@@ -160,19 +161,38 @@ const metricDispatchWorkers = 32
 // a new goroutine spawned per MetricEvent (unbounded goroutine *creation*
 // churn under sustained message rate, even though concurrent goroutines
 // were already bounded by the old metricSlots semaphore). These goroutines
-// run for the Server's lifetime; queue is never closed, so they simply exit
-// if the process does. If metrics is nil, no workers are started and
+// run until stop is closed (by Server.Shutdown) — queue itself is never
+// closed, since a concurrent recordMetric could still be sending to it,
+// and closing a channel a sender might still write to panics. wg lets
+// Shutdown wait for every worker to actually exit, not just signal them,
+// so it can honestly call metric dispatch finished rather than merely
+// asked-to-stop. If metrics is nil, no workers are started and
 // recordMetric's nil-queue check makes dispatch a no-op.
-func startMetricDispatch(queue chan MetricEvent, metrics Metrics) {
+//
+// Because stop and queue are both ready once Shutdown starts closing
+// things down, a worker's select between them can still pick up and
+// deliver an event that was already queued at that moment (Go's select
+// among ready cases is pseudo-random) — this is intentional, not a bug to
+// fix: it's the same "may still fire once, may not" guarantee recordMetric
+// already documents for a nearly-full queue, just at shutdown instead of
+// under load.
+func startMetricDispatch(queue chan MetricEvent, stop <-chan struct{}, wg *sync.WaitGroup, metrics Metrics) {
 	for range metricDispatchWorkers {
+		wg.Add(1)
 		go func() {
-			for event := range queue {
-				func() {
-					// A diagnostic hook must not be able to take down the
-					// protocol server.
-					defer func() { _ = recover() }()
-					metrics.Record(context.Background(), event)
-				}()
+			defer wg.Done()
+			for {
+				select {
+				case event := <-queue:
+					func() {
+						// A diagnostic hook must not be able to take down
+						// the protocol server.
+						defer func() { _ = recover() }()
+						metrics.Record(context.Background(), event)
+					}()
+				case <-stop:
+					return
+				}
 			}
 		}()
 	}

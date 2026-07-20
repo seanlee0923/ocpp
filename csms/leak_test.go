@@ -148,6 +148,36 @@ func waitForNoSession(t *testing.T, server *Server, identity string) {
 	t.Fatalf("session %q was retained", identity)
 }
 
+// TestShutdownStopsMetricDispatchWorkers proves Server.Shutdown actually
+// stops and waits for the metricDispatchWorkers pool (started by New when
+// Config.Metrics is set), not just the goroutines started per-connection.
+// Without this, a process that repeatedly creates and Shuts down Servers
+// (tests, tenant-per-Server setups, config-reload replacing a Server)
+// leaks metricDispatchWorkers goroutines per Server, even though Shutdown
+// is documented as terminal.
+func TestShutdownStopsMetricDispatchWorkers(t *testing.T) {
+	runtime.GC()
+	baseline := runtime.NumGoroutine()
+
+	server, err := New(Config{
+		Versions: []protocol.Version{protocol.OCPP16},
+		Metrics:  MetricsFunc(func(context.Context, MetricEvent) {}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.GC()
+	if withWorkers := runtime.NumGoroutine(); withWorkers < baseline+metricDispatchWorkers {
+		t.Fatalf("goroutines after New() with Metrics set = %d, want at least baseline(%d)+metricDispatchWorkers(%d)",
+			withWorkers, baseline, metricDispatchWorkers)
+	}
+
+	if err := server.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitForGoroutineBudget(t, baseline, 2)
+}
+
 func waitForGoroutineBudget(t *testing.T, baseline, allowance int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

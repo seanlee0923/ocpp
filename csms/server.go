@@ -111,6 +111,9 @@ type Server struct {
 	reservationSequence atomic.Uint64
 	shuttingDown        atomic.Bool
 	metricQueue         chan MetricEvent
+	metricStop          chan struct{}
+	metricStopOnce      sync.Once
+	metricWG            sync.WaitGroup
 }
 
 type sessionEntry struct {
@@ -202,7 +205,8 @@ func New(config Config) (*Server, error) {
 	}
 	if config.Metrics != nil {
 		server.metricQueue = make(chan MetricEvent, maxConcurrentMetricDispatch)
-		startMetricDispatch(server.metricQueue, config.Metrics)
+		server.metricStop = make(chan struct{})
+		startMetricDispatch(server.metricQueue, server.metricStop, &server.metricWG, config.Metrics)
 	}
 	return server, nil
 }
@@ -399,8 +403,12 @@ func (s *Server) Snapshot() ServerSnapshot {
 func (s *Server) Healthy() bool { return !s.shuttingDown.Load() }
 
 // Shutdown rejects new connections, closes active sessions and waits until
-// they finish or ctx expires. Shutdown is terminal; a Server cannot accept new
-// connections afterward. Repeated calls are safe.
+// they finish or ctx expires, then stops this Server's metric dispatch
+// workers (if Config.Metrics was set) and waits for them to actually exit
+// too — Shutdown is terminal, a Server cannot accept new connections
+// afterward, so it should honestly release everything it started, not
+// leave metricDispatchWorkers goroutines running forever. Repeated calls
+// are safe.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.shuttingDown.Store(true)
 	s.sessionsMu.RLock()
@@ -423,6 +431,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 		if err := session.waitHandlers(ctx); err != nil {
 			return err
+		}
+	}
+	if s.metricStop != nil {
+		s.metricStopOnce.Do(func() { close(s.metricStop) })
+		done := make(chan struct{})
+		go func() {
+			s.metricWG.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 	return nil
