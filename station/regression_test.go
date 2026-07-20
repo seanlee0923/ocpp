@@ -732,3 +732,41 @@ func TestStationRejectsBinaryFrames(t *testing.T) {
 		t.Fatal("station neither dispatched the CALL nor rejected the binary frame in time")
 	}
 }
+
+// TestStationDisconnectsOnMalformedFrame proves a frame protocol.Decode
+// can't parse at all closes the connection (surfacing through Run's return
+// and OnDisconnect) instead of being silently skipped forever — matching
+// csms.Server's read loop, which always treats this class of error as
+// fatal to the connection regardless of OCPP version. Before this fix,
+// readLoop's `continue` meant the CSMS got no signal anything was wrong
+// and the station just sat there, connected, doing nothing useful.
+func TestStationDisconnectsOnMalformedFrame(t *testing.T) {
+	upgrader := websocket.Upgrader{Subprotocols: []string{string(protocol.OCPP16)}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		// Deliberately no conn.Close(): see TestStationRejectsBinaryFrames
+		// for why the connection is left open past this handler returning.
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`not valid json at all`))
+	}))
+	defer server.Close()
+
+	st, err := station.New(station.Config{URL: wsURL(server.URL), Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- st.Run(context.Background()) }()
+	t.Cleanup(st.Stop)
+
+	select {
+	case err := <-runDone:
+		if err == nil || !errors.Is(err, protocol.ErrInvalidMessage) {
+			t.Fatalf("Run error = %v, want protocol.ErrInvalidMessage (not just any connection failure)", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("station did not disconnect after a malformed frame")
+	}
+}
