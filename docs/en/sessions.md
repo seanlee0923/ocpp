@@ -31,6 +31,16 @@ OnDuplicateSession: func(ctx context.Context, attempt csms.DuplicateSessionAttem
 The existing session is not closed until the new WebSocket upgrade
 succeeds. A replaced session's error is `ErrSessionReplaced`.
 
+`OnConnect` is called synchronously after the read loop has already
+started, so it does not block inbound message processing — but the
+goroutine serving that connection does not move on to the next step
+(waiting for the connection to close, calling `OnDisconnect`, unregistering
+the session) until `OnConnect` returns. If `OnConnect` never returns, that
+session never gets an `OnDisconnect` call and is never removed from the
+registry, even after the underlying connection has actually closed.
+`OnConnect`, `OnDisconnect`, and `OnDuplicateSession` must all return
+promptly; hand off anything slow to its own goroutine.
+
 `PingInterval`, `PongTimeout`, and `IdleTimeout` manage connection health.
 `Session.Done()` closes on termination and `Session.Err()` holds the cause.
 `Session.Context()` can be used as the cancellation basis for handlers and

@@ -29,6 +29,13 @@ OnDuplicateSession: func(ctx context.Context, attempt csms.DuplicateSessionAttem
 새 WebSocket upgrade가 성공하기 전에는 기존 세션을 종료하지 않는다. 교체된 세션의 오류는
 `ErrSessionReplaced`다.
 
+`OnConnect`는 read loop가 이미 시작된 뒤 별도로 동기 호출되므로 inbound 메시지 처리를
+막지는 않지만, 그 연결을 서빙하는 goroutine은 `OnConnect`가 반환할 때까지 다음 단계(연결
+종료 대기, `OnDisconnect` 호출, 세션 등록 해제)로 진행하지 않는다. `OnConnect`가 반환하지
+않으면 해당 세션은 실제 연결이 끊긴 뒤에도 `OnDisconnect`가 호출되지 않고 registry에서
+제거되지 않는다 — `OnConnect`/`OnDisconnect`/`OnDuplicateSession`은 모두 빠르게 반환해야
+하며, 오래 걸리는 작업은 별도 goroutine으로 넘겨야 한다.
+
 `PingInterval`, `PongTimeout`, `IdleTimeout`으로 연결 상태를 관리한다. `Session.Done()`은
 종료 시 닫히고 `Session.Err()`에 원인이 남는다. `Session.Context()`는 handler와 background
 작업의 취소 기준으로 사용할 수 있다.
