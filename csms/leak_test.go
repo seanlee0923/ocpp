@@ -210,6 +210,47 @@ func TestShutdownReturnsCtxErrIfMetricWorkersDoNotExit(t *testing.T) {
 	}
 }
 
+// TestShutdownEarlyReturnStillStopsMetricWorkers proves Shutdown signals
+// metricDispatchWorkers to stop even when it returns early because ctx
+// expired while still waiting on an active session to close — not just in
+// the already-covered case where ctx instead expires later, during the
+// final metric-worker-wait phase
+// (TestShutdownReturnsCtxErrIfMetricWorkersDoNotExit). Without this, the
+// session-wait loop's early return skips the explicit metricStopOnce.Do
+// call entirely, leaking the workers forever.
+func TestShutdownEarlyReturnStillStopsMetricWorkers(t *testing.T) {
+	server, err := New(Config{
+		Versions: []protocol.Version{protocol.OCPP16},
+		Metrics:  MetricsFunc(func(context.Context, MetricEvent) {}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
+	defer conn.Close()
+	waitForSession(t, server, "CP-001")
+
+	// An already-expired ctx: the per-session wait loop hits ctx.Done() on
+	// its very first select, before the session has had any chance to
+	// actually finish closing, and long before Shutdown would otherwise
+	// reach its explicit metricStopOnce.Do call further down.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+	if err := server.Shutdown(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Shutdown error = %v, want context.DeadlineExceeded", err)
+	}
+
+	select {
+	case <-server.metricStop:
+	case <-time.After(time.Second):
+		t.Fatal("metricStop was never closed after Shutdown returned early from the session-wait loop")
+	}
+}
+
 // settledGoroutineCount waits for runtime.NumGoroutine() to stop changing
 // before returning it, instead of taking a single snapshot right after
 // runtime.GC(). Earlier tests in this package's binary leave goroutines

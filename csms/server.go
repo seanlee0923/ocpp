@@ -467,6 +467,17 @@ func (s *Server) Healthy() bool { return !s.shuttingDown.Load() }
 // are safe.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.shuttingDown.Store(true)
+	if s.metricStop != nil {
+		// Signals the metric workers to stop on every exit from here on,
+		// including an early return from the session-wait loop below when
+		// ctx expires first — otherwise that path skips the explicit
+		// metricStopOnce.Do call further down entirely, leaking
+		// metricDispatchWorkers forever and contradicting this method's
+		// own doc comment. metricStopOnce makes a second Do call (the
+		// explicit one below, in the normal path) a no-op, not a double
+		// close.
+		defer s.metricStopOnce.Do(func() { close(s.metricStop) })
+	}
 	s.sessionsMu.RLock()
 	sessions := make([]*Session, 0, len(s.sessions))
 	for _, entry := range s.sessions {
