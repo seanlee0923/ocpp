@@ -537,22 +537,23 @@ a full WebSocket loopback round trip.
 GOCACHE=/tmp/ocpp-go-build-cache go test -run '^$' -bench . -benchmem ./...
 ```
 
-Reference numbers below (Apple M2, local run; actual results vary by hardware).
+Reference numbers below (Apple M2, median of `-benchtime=1s -count=3`;
+actual results vary with hardware and system load).
 
 | Benchmark | Time/op | Bytes/op | Allocs/op |
 |---|---:|---:|---:|
-| `DecodeCall` | 9.6 µs | 4.8 KB | 115 |
-| `EncodeCallResult` | 2.6 µs | 969 B | 21 |
-| `ValidateJSONSmall` (BootNotification) | 2.2 µs | 1.8 KB | 27 |
-| `ValidateJSONLarge` (100-item array) | 93.4 µs | 55.6 KB | 1026 |
-| `ValidateThenUnmarshalSmall` | 3.8 µs | 2.2 KB | 37 |
-| `ValidateThenUnmarshalLarge` | 156.9 µs | 65.9 KB | 1143 |
-| `RouterLookup`, 0 middleware | 15.5 ns | 0 B | 0 |
-| `RouterLookup`, 5 middleware | 113.6 ns | 128 B | 6 |
-| `InboundCallRoundTrip` (full WebSocket loopback round trip) | 30.4 µs | 5.7 KB | 82 |
-| `InboundCallRoundTrip`, with `Config.Metrics` set | +6% | +225 B | +2 |
-| `OutboundCallRoundTrip` (`csms.Call` full round trip) | baseline | 12.9 KB | 202 |
-| `OutboundCallRoundTrip`, with `Config.Metrics` set | +13% | +224 B | +2 |
+| `DecodeCall` | 5.85 µs | 4.8 KB | 115 |
+| `EncodeCallResult` | 1.55 µs | 969 B | 21 |
+| `ValidateJSONSmall` (BootNotification) | 1.37 µs | 1.8 KB | 27 |
+| `ValidateJSONLarge` (100-item array) | 57.0 µs | 55.6 KB | 1026 |
+| `ValidateThenUnmarshalSmall` | 2.41 µs | 2.2 KB | 37 |
+| `ValidateThenUnmarshalLarge` | 95.1 µs | 65.9 KB | 1143 |
+| `RouterLookup`, 0 middleware | 16.1 ns | 0 B | 0 |
+| `RouterLookup`, 5 middleware | 122.2 ns | 128 B | 6 |
+| `InboundCallRoundTrip` (full WebSocket loopback round trip) | 30.8 µs | 6.0 KB | 86 |
+| `InboundCallRoundTrip`, with `Config.Metrics` set (~0%, within measurement noise) | 30.8 µs | 6.0 KB | 86 |
+| `OutboundCallRoundTrip` (`csms.Call` full round trip) | 35.4 µs | 12.9 KB | 202 |
+| `OutboundCallRoundTrip`, with `Config.Metrics` set (+2.9%) | 36.5 µs | 12.9 KB | 202 |
 
 Even a full round trip over a real network stays in the tens of
 microseconds, so throughput is unlikely to be a bottleneck for OCPP, where a
@@ -561,12 +562,12 @@ deployments where many sessions send large-array payloads (such as
 `NotifyPeriodicEventStream`) concurrently, see the
 `ValidateJSONLarge`/`ValidateThenUnmarshalLarge` numbers.
 
-Configuring `Config.Metrics` (which dispatches events through a fixed pool
-of worker goroutines) adds roughly +6% to an inbound CALL round trip and
-+13% to an outbound `csms.Call` round trip (+2 allocs per event in both
-cases). These are relative numbers measured in the same run; deployments
-that leave `Config.Metrics` unset (the common case) pay none of this
-overhead.
+Configuring `Config.Metrics` dispatches events through a fixed worker pool.
+In the same-run comparison above, the inbound CALL difference was within
+measurement noise, while outbound `csms.Call` increased by about 2.9%; the
+allocation count was unchanged on both paths. Actual cost depends on the
+`Metrics.Record` implementation. Leaving `Config.Metrics` unset avoids the
+dispatch cost.
 
 ## Structured logging
 

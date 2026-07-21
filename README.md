@@ -503,22 +503,23 @@ frame encode/decode, schema 검증, Router dispatch와 WebSocket loopback 왕복
 GOCACHE=/tmp/ocpp-go-build-cache go test -run '^$' -bench . -benchmem ./...
 ```
 
-참고용 측정치입니다(Apple M2, 로컬 실행; 실제 수치는 하드웨어에 따라 달라집니다).
+참고용 측정치입니다(Apple M2, `-benchtime=1s -count=3`의 중앙값; 실제 수치는
+하드웨어와 시스템 부하에 따라 달라집니다).
 
 | 벤치마크 | 시간/op | 메모리/op | 할당/op |
 |---|---:|---:|---:|
-| `DecodeCall` | 9.6 µs | 4.8 KB | 115 |
-| `EncodeCallResult` | 2.6 µs | 969 B | 21 |
-| `ValidateJSONSmall` (BootNotification) | 2.2 µs | 1.8 KB | 27 |
-| `ValidateJSONLarge` (배열 100개) | 93.4 µs | 55.6 KB | 1026 |
-| `ValidateThenUnmarshalSmall` | 3.8 µs | 2.2 KB | 37 |
-| `ValidateThenUnmarshalLarge` | 156.9 µs | 65.9 KB | 1143 |
-| `RouterLookup`, 미들웨어 0개 | 15.5 ns | 0 B | 0 |
-| `RouterLookup`, 미들웨어 5개 | 113.6 ns | 128 B | 6 |
-| `InboundCallRoundTrip` (실제 WebSocket loopback 전체 왕복) | 30.4 µs | 5.7 KB | 82 |
-| `InboundCallRoundTrip`, `Config.Metrics` 설정 | +6% | +225 B | +2 |
-| `OutboundCallRoundTrip` (`csms.Call` 실제 왕복) | 기준치 | 12.9 KB | 202 |
-| `OutboundCallRoundTrip`, `Config.Metrics` 설정 | +13% | +224 B | +2 |
+| `DecodeCall` | 5.85 µs | 4.8 KB | 115 |
+| `EncodeCallResult` | 1.55 µs | 969 B | 21 |
+| `ValidateJSONSmall` (BootNotification) | 1.37 µs | 1.8 KB | 27 |
+| `ValidateJSONLarge` (배열 100개) | 57.0 µs | 55.6 KB | 1026 |
+| `ValidateThenUnmarshalSmall` | 2.41 µs | 2.2 KB | 37 |
+| `ValidateThenUnmarshalLarge` | 95.1 µs | 65.9 KB | 1143 |
+| `RouterLookup`, 미들웨어 0개 | 16.1 ns | 0 B | 0 |
+| `RouterLookup`, 미들웨어 5개 | 122.2 ns | 128 B | 6 |
+| `InboundCallRoundTrip` (실제 WebSocket loopback 전체 왕복) | 30.8 µs | 6.0 KB | 86 |
+| `InboundCallRoundTrip`, `Config.Metrics` 설정 (약 0%, 측정 잡음 범위) | 30.8 µs | 6.0 KB | 86 |
+| `OutboundCallRoundTrip` (`csms.Call` 실제 왕복) | 35.4 µs | 12.9 KB | 202 |
+| `OutboundCallRoundTrip`, `Config.Metrics` 설정 (+2.9%) | 36.5 µs | 12.9 KB | 202 |
 
 CALL 하나를 실제 네트워크까지 왕복시켜도 30µs대이므로, OCPP처럼 충전기 한 대가
 몇 분에 한 번 메시지를 보내는 저빈도 프로토콜에서는 처리량이 병목이 될 가능성이
@@ -526,10 +527,10 @@ CALL 하나를 실제 네트워크까지 왕복시켜도 30µs대이므로, OCPP
 동시에 보내는 배포에서는 `ValidateJSONLarge`/`ValidateThenUnmarshalLarge` 수치를
 참고하세요.
 
-`Config.Metrics`를 설정하면(고정 워커 풀로 dispatch) inbound CALL
-왕복은 약 +6%, outbound `csms.Call` 왕복은 약 +13%(둘 다 이벤트당 +2 alloc) 늘어난다.
-같은 실행에서 측정한 상대값 기준이며, `Config.Metrics`를 설정하지 않으면(대다수
-배포) 이 오버헤드는 전혀 발생하지 않는다.
+`Config.Metrics`를 설정하면 고정 워커 풀로 이벤트를 dispatch한다. 같은 실행에서
+측정한 결과 inbound CALL 차이는 측정 잡음 범위였고, outbound `csms.Call`은 약 2.9%
+늘었으며 두 경로 모두 allocation 수는 변하지 않았다. 실제 비용은 `Metrics.Record`
+구현에 따라 달라진다. `Config.Metrics`를 설정하지 않으면 dispatch 비용이 발생하지 않는다.
 
 ## 구조화 로그
 
