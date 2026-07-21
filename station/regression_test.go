@@ -19,6 +19,7 @@ import (
 	"github.com/seanlee0923/ocpp/station"
 	"github.com/seanlee0923/ocpp/v16"
 	"github.com/seanlee0923/ocpp/v201"
+	"github.com/seanlee0923/ocpp/v21"
 )
 
 // TestStationHandlerPanicIsRecovered proves a panicking Handle callback does
@@ -232,6 +233,91 @@ func TestStationCallErrorPassesThroughAlreadyValidFields(t *testing.T) {
 	if string(remote.Details) != "{}" {
 		t.Fatalf("CALLERROR details = %s, want {} for nil Details", remote.Details)
 	}
+}
+
+// TestStationCallErrorCodeMatchesOCPPVersion proves a handler cannot send a
+// CALLERROR code that does not exist in the Station's negotiated OCPP
+// version. Common codes and version-specific codes remain unchanged; codes
+// from another version are normalized to InternalError, matching csms.
+func TestStationCallErrorCodeMatchesOCPPVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version protocol.Version
+		code    string
+		want    csms.ErrorCode
+	}{
+		{"1.6 rejects MessageTypeNotSupported", protocol.OCPP16, "MessageTypeNotSupported", csms.InternalError},
+		{"1.6 rejects FormatViolation", protocol.OCPP16, "FormatViolation", csms.InternalError},
+		{"1.6 accepts FormationViolation", protocol.OCPP16, "FormationViolation", csms.FormationViolation},
+		{"2.0.1 rejects FormationViolation", protocol.OCPP201, "FormationViolation", csms.InternalError},
+		{"2.0.1 accepts MessageTypeNotSupported", protocol.OCPP201, "MessageTypeNotSupported", csms.MessageTypeNotSupported},
+		{"2.1 rejects misspelled OccurenceConstraintViolation", protocol.OCPP21, "OccurenceConstraintViolation", csms.InternalError},
+		{"2.1 accepts RpcFrameworkError", protocol.OCPP21, "RpcFrameworkError", csms.RpcFrameworkError},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := stationCallErrorCode(t, test.version, test.code); got != test.want {
+				t.Fatalf("CALLERROR code = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func stationCallErrorCode(t *testing.T, version protocol.Version, code string) csms.ErrorCode {
+	t.Helper()
+	connected := make(chan *csms.Session, 1)
+	server, err := csms.New(csms.Config{
+		Versions:  []protocol.Version{version},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	t.Cleanup(httpServer.Close)
+
+	st, err := station.New(station.Config{
+		URL: wsURL(httpServer.URL), Identity: "CP-001", Version: version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch version {
+	case protocol.OCPP16:
+		err = station.Handle(st, func(context.Context, v16.DataTransferRequest) (v16.DataTransferConfirmation, error) {
+			return v16.DataTransferConfirmation{}, &station.CallError{Code: code, Description: "test"}
+		})
+	case protocol.OCPP201:
+		err = station.Handle(st, func(context.Context, v201.DataTransferRequest) (v201.DataTransferConfirmation, error) {
+			return v201.DataTransferConfirmation{}, &station.CallError{Code: code, Description: "test"}
+		})
+	case protocol.OCPP21:
+		err = station.Handle(st, func(context.Context, v21.DataTransferRequest) (v21.DataTransferConfirmation, error) {
+			return v21.DataTransferConfirmation{}, &station.CallError{Code: code, Description: "test"}
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	session := <-connected
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var callErr error
+	switch version {
+	case protocol.OCPP16:
+		_, callErr = csms.Call[v16.DataTransferRequest, v16.DataTransferConfirmation](ctx, session, v16.DataTransferRequest{VendorID: "test"})
+	case protocol.OCPP201:
+		_, callErr = csms.Call[v201.DataTransferRequest, v201.DataTransferConfirmation](ctx, session, v201.DataTransferRequest{VendorID: "test"})
+	case protocol.OCPP21:
+		_, callErr = csms.Call[v21.DataTransferRequest, v21.DataTransferConfirmation](ctx, session, v21.DataTransferRequest{VendorID: "test"})
+	}
+	var remote *csms.RemoteCallError
+	if !errors.As(callErr, &remote) {
+		t.Fatalf("error = %v, want a RemoteCallError", callErr)
+	}
+	return remote.Code
 }
 
 func TestNewHandleRejectsDuplicateRegistration(t *testing.T) {

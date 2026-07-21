@@ -226,8 +226,8 @@ func (e *CallError) Error() string { return e.Description }
 // conn.send call ignores that error (there is nothing else useful to do
 // with it at that point), the CSMS would be left with no response at all
 // for a CALL it's waiting on, rather than a well-formed one.
-func normalizeCallError(code, description string, details json.RawMessage) (string, string, json.RawMessage) {
-	if code == "" || utf8.RuneCountInString(code) > protocol.MaxErrorCodeLength {
+func normalizeCallError(version protocol.Version, code, description string, details json.RawMessage) (string, string, json.RawMessage) {
+	if !validCallErrorCode(version, code) {
 		code = "InternalError"
 	}
 	description = truncateRunes(description, protocol.MaxErrorDescriptionLength)
@@ -239,6 +239,19 @@ func normalizeCallError(code, description string, details json.RawMessage) (stri
 		details = json.RawMessage(`{}`)
 	}
 	return code, description, details
+}
+
+func validCallErrorCode(version protocol.Version, code string) bool {
+	switch code {
+	case "NotImplemented", "NotSupported", "InternalError", "ProtocolError", "SecurityError",
+		"PropertyConstraintViolation", "TypeConstraintViolation", "GenericError":
+		return true
+	}
+	if version == protocol.OCPP16 {
+		return code == "FormationViolation" || code == "OccurenceConstraintViolation"
+	}
+	return code == "FormatViolation" || code == "OccurrenceConstraintViolation" ||
+		code == "MessageTypeNotSupported" || code == "RpcFrameworkError"
 }
 
 func truncateRunes(value string, limit int) string {
@@ -797,7 +810,7 @@ func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 		if err != nil {
 			var callErr *CallError
 			if errors.As(err, &callErr) {
-				code, description, details := normalizeCallError(callErr.Code, callErr.Description, callErr.Details)
+				code, description, details := normalizeCallError(s.config.Version, callErr.Code, callErr.Description, callErr.Details)
 				_ = conn.send(ctx, protocol.CallError{ID: call.ID, Code: code, Description: description, Details: details})
 				return
 			}
