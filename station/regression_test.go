@@ -306,6 +306,24 @@ func TestCallRejectsMismatchedPayloadDirection(t *testing.T) {
 	}
 }
 
+// TestCallRejectsPointerTypedPayloads proves Call rejects pointer generic
+// payload parameters with a normal error. Generated payload methods use value
+// receivers, so *T also satisfies protocol.Payload at compile time, but the
+// zero *Confirmation is nil and calling Direction on it would panic without
+// this explicit guard.
+func TestCallRejectsPointerTypedPayloads(t *testing.T) {
+	st, err := station.New(station.Config{URL: "ws://localhost:8080", Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = station.Call[v16.HeartbeatRequest, *v16.HeartbeatConfirmation](
+		context.Background(), st, v16.HeartbeatRequest{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "non-pointer") {
+		t.Fatalf("error = %v, want a non-pointer payload error", err)
+	}
+}
+
 // TestCallRejectsVersionMismatchWithStation proves Call rejects a request
 // whose OCPP version doesn't match the Station's configured version, rather
 // than sending a CALL the CSMS never negotiated support for.
