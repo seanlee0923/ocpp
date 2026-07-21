@@ -1280,3 +1280,97 @@ func TestStationDisconnectsOnMalformedFrame(t *testing.T) {
 		t.Fatal("station did not disconnect after a malformed frame")
 	}
 }
+
+// TestStationRespondsToUnsupportedMessageType proves a well-formed envelope
+// naming an unsupported message type ID (its unique ID survived parsing,
+// unlike TestStationDisconnectsOnMalformedFrame's case) gets a
+// MessageTypeNotSupported CALLERROR preserving that ID, and the connection
+// stays open, for OCPP 2.0.1/2.1 — mirroring csms.Server's own read loop.
+func TestStationRespondsToUnsupportedMessageType(t *testing.T) {
+	for _, version := range []protocol.Version{protocol.OCPP201, protocol.OCPP21} {
+		t.Run(string(version), func(t *testing.T) {
+			upgrader := websocket.Upgrader{Subprotocols: []string{string(version)}}
+			verified := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					return
+				}
+				// Deliberately no conn.Close(): see TestStationRejectsBinaryFrames
+				// for why the connection is left open past this handler returning.
+				defer close(verified)
+				if err := conn.WriteMessage(websocket.TextMessage, []byte(`[9,"future-1",{}]`)); err != nil {
+					return
+				}
+				_, data, err := conn.ReadMessage()
+				if err != nil {
+					t.Errorf("reading the station's response: %v", err)
+					return
+				}
+				message, err := protocol.Decode(data)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				callError, ok := message.(protocol.CallError)
+				if !ok || callError.ID != "future-1" || callError.Code != "MessageTypeNotSupported" {
+					t.Errorf("response = %#v, want a MessageTypeNotSupported CALLERROR for id future-1", message)
+				}
+			}))
+			defer server.Close()
+
+			st, err := station.New(station.Config{URL: wsURL(server.URL), Identity: "CP-001", Version: version})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runInBackground(t, st)
+			waitConnected(t, st)
+
+			select {
+			case <-verified:
+			case <-time.After(2 * time.Second):
+				t.Fatal("server never received the station's response")
+			}
+			if st.State() != station.Connected {
+				t.Fatalf("state after an unsupported message type = %v, want Connected", st.State())
+			}
+		})
+	}
+}
+
+// TestStationDisconnectsOnUnsupportedMessageTypeUnder16 proves the graceful
+// MessageTypeNotSupported response TestStationRespondsToUnsupportedMessageType
+// proves for 2.0.1/2.1 does not apply to OCPP 1.6, which has no such
+// CALLERROR code in the spec — the same well-formed-but-unknown-type frame
+// must still disconnect under 1.6, matching csms.Server's own version gate.
+func TestStationDisconnectsOnUnsupportedMessageTypeUnder16(t *testing.T) {
+	upgrader := websocket.Upgrader{Subprotocols: []string{string(protocol.OCPP16)}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		// Deliberately no conn.Close(): see TestStationRejectsBinaryFrames
+		// for why the connection is left open past this handler returning.
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`[9,"future-1",{}]`))
+	}))
+	defer server.Close()
+
+	st, err := station.New(station.Config{URL: wsURL(server.URL), Identity: "CP-001", Version: protocol.OCPP16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- st.Run(context.Background()) }()
+	t.Cleanup(st.Stop)
+
+	select {
+	case err := <-runDone:
+		var unsupported *protocol.UnsupportedMessageTypeError
+		if err == nil || !errors.As(err, &unsupported) {
+			t.Fatalf("Run error = %v, want a *protocol.UnsupportedMessageTypeError", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("station did not disconnect for an unsupported message type under OCPP 1.6")
+	}
+}

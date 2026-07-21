@@ -642,17 +642,29 @@ func (s *Station) readLoop(conn *stationConn) error {
 		}
 		message, err := protocol.Decode(data)
 		if err != nil {
-			// A frame protocol.Decode can't parse at all (malformed JSON,
-			// wrong array shape, invalid UTF-8, ...) is a genuinely
-			// unrecoverable framing failure, not a message the station
-			// simply disagrees with — matching csms.Server's own read
-			// loop, which always closes the connection for this case too
-			// (independent of OCPP version; csms only stays open for the
-			// narrower case of a well-formed envelope naming an
-			// unsupported message type, which doesn't apply to a decode
-			// failure like this one). Silently ignoring it instead would
-			// leave the CSMS waiting on a response that's never coming,
-			// with no signal anything went wrong.
+			// A well-formed envelope naming an unsupported message type ID
+			// is the one Decode failure that isn't a fatal framing error:
+			// the ID survived parsing, so the station can name it in a
+			// proper CALLERROR and keep the connection open, mirroring
+			// csms.Server's own read loop. Like csms, this is only valid
+			// from OCPP 2.0.1 onward — 1.6 has no MessageTypeNotSupported
+			// CALLERROR code to send.
+			var unsupported *protocol.UnsupportedMessageTypeError
+			if s.config.Version != protocol.OCPP16 && errors.As(err, &unsupported) {
+				_ = conn.send(conn.ctx, protocol.CallError{
+					ID: unsupported.ID, Code: "MessageTypeNotSupported",
+					Description: "message type is not supported", Details: json.RawMessage(`{}`),
+				})
+				continue
+			}
+			// Anything else (malformed JSON, wrong array shape, invalid
+			// UTF-8, ...) is a genuinely unrecoverable framing failure, not
+			// a message the station simply disagrees with — matching
+			// csms.Server's own read loop, which always closes the
+			// connection for this case too, independent of OCPP version.
+			// Silently ignoring it instead would leave the CSMS waiting on
+			// a response that's never coming, with no signal anything went
+			// wrong.
 			return err
 		}
 		switch value := message.(type) {
