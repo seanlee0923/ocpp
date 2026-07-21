@@ -1,4 +1,4 @@
-# ocpp-go
+# ocpp
 
 [한국어](README.md) | **English**
 
@@ -506,9 +506,9 @@ sent by a Charging Station is returned as `*csms.RemoteCallError`, whose
 ## Verification
 
 ```sh
-GOCACHE=/tmp/ocpp-go-build-cache go vet ./...
-GOCACHE=/tmp/ocpp-go-build-cache go test ./...
-GOCACHE=/tmp/ocpp-go-build-cache go test -race ./...
+GOCACHE=/tmp/ocpp-build-cache go vet ./...
+GOCACHE=/tmp/ocpp-build-cache go test ./...
+GOCACHE=/tmp/ocpp-build-cache go test -race ./...
 golangci-lint run ./...
 ```
 
@@ -523,7 +523,7 @@ the local number down, so the Codecov badge reports a number computed with
 those paths excluded via `codecov.yml`.
 
 ```sh
-GOCACHE=/tmp/ocpp-go-build-cache go test -coverpkg=./... -coverprofile=coverage.out ./...
+GOCACHE=/tmp/ocpp-build-cache go test -coverpkg=./... -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out | tail -1
 ```
 
@@ -535,7 +535,7 @@ abrupt disconnects. Long-running soak tests are opt-in and log heap/goroutine
 statistics before and after the run.
 
 ```sh
-OCPP_SOAK_DURATION=30m GOCACHE=/tmp/ocpp-go-build-cache go test -race \
+OCPP_SOAK_DURATION=30m GOCACHE=/tmp/ocpp-build-cache go test -race \
   -timeout 35m -run '^TestSessionSoak$' ./csms
 ```
 
@@ -546,7 +546,7 @@ Benchmarks cover frame encode/decode, schema validation, Router dispatch, and
 a full WebSocket loopback round trip.
 
 ```sh
-GOCACHE=/tmp/ocpp-go-build-cache go test -run '^$' -bench . -benchmem ./...
+GOCACHE=/tmp/ocpp-build-cache go test -run '^$' -bench . -benchmem ./...
 ```
 
 Reference numbers below (Apple M2, median of `-benchtime=1s -count=3`;

@@ -71,7 +71,7 @@ the same major version.
   example.
 - Linked [`ocpp-schema-gen`](https://github.com/seanlee0923/ocpp-schema-gen),
   a from-scratch generator, from the README's "OCA Schema source" section,
-  so anyone can independently re-verify that `ocpp-go`'s 365 generated types
+  so anyone can independently re-verify that `ocpp`'s 365 generated types
   actually match the official OCA JSON Schema.
 - Documented, across `docs/handlers.md`, `docs/sessions.md`,
   `docs/security.md`, and the README, the contract that "`ctx` cancellation

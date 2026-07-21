@@ -61,7 +61,7 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   `Config.TLSConfig`로 설정한다. 여러 charger 운영은 호출자 책임(자체
   `map[string]*station.Station` 관리) — 이 패키지는 프로토콜/세션 동작만
   다룬다. [`examples/station-client`](examples/station-client) 예제 추가.
-- `ocpp-go`의 생성 타입 365개가 공식 OCA JSON Schema와 실제로 일치하는지
+- `ocpp`의 생성 타입 365개가 공식 OCA JSON Schema와 실제로 일치하는지
   누구나 독립적으로 재검증할 수 있도록, from-scratch generator인
   [`ocpp-schema-gen`](https://github.com/seanlee0923/ocpp-schema-gen)을
   README "OCA Schema 출처" 절에 링크했다.

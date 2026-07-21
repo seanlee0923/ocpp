@@ -74,7 +74,7 @@ func main() {
 		trace.WithBatcher(exporter, trace.WithBatchTimeout(time.Second)),
 	)
 	defer func() { _ = tracerProvider.Shutdown(context.Background()) }()
-	tracer := tracerProvider.Tracer("ocpp-go/examples/otel-hook")
+	tracer := tracerProvider.Tracer("ocpp/examples/otel-hook")
 
 	router := csms.NewRouter()
 	router.Use(tracingMiddleware(tracer))
