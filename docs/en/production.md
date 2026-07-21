@@ -23,15 +23,6 @@ invalid configuration. Construct `Config` with keyed fields, propagate the
 handler's context to DB and outbound calls, and avoid unbounded background
 goroutines.
 
-After handlers run synchronously in registration order after the CALLRESULT
-write while continuing to occupy one `MaxConcurrentHandlers` slot for that
-session. Each callback receives a fresh `CallTimeout`, so N callbacks making
-blocking CALLs can accumulate up to roughly N times that bound. Use a short
-individual deadline for each CALL and keep both callback count and sequential
-CALL count small; send long work to a bounded worker queue. Holding the slot
-too long can delay the same station's post-Boot StatusNotification/Heartbeat
-and eventually fill `MaxQueuedHandlers`.
-
 ## Proxy and TLS
 
 If TLS is terminated at a reverse proxy, the current core does not

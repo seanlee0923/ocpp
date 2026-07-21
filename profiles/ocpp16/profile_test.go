@@ -3,8 +3,6 @@ package ocpp16
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
@@ -271,88 +269,6 @@ func TestPendingBootDoesNotUnlockOtherActions(t *testing.T) {
 	sendCall(t, conn, "2", v16.HeartbeatRequest{})
 	if message := readMessage(t, conn); message.Type() != protocol.CallErrorType {
 		t.Fatalf("response type = %d", message.Type())
-	}
-}
-
-func TestConfigurationCallsRequireAcceptedBoot(t *testing.T) {
-	profile, err := NewProfile(csms.NewRouter())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := profile.CallChangeConfiguration(context.Background(), nil, v16.ChangeConfigurationRequest{Key: "HeartbeatInterval", Value: "300"}); !errors.Is(err, ErrNotBooted) {
-		t.Fatalf("CallChangeConfiguration error = %v, want ErrNotBooted", err)
-	}
-	if _, err := profile.CallGetConfiguration(context.Background(), nil, v16.GetConfigurationRequest{}); !errors.Is(err, ErrNotBooted) {
-		t.Fatalf("CallGetConfiguration error = %v, want ErrNotBooted", err)
-	}
-}
-
-func TestBootNotificationAfterRunsAfterConfirmationAndAllowsMultipleConfigurationCalls(t *testing.T) {
-	router := csms.NewRouter()
-	profile, err := NewProfile(router)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := profile.HandleBootNotification((&testHandlers{bootStatus: v16.BootNotificationConfirmationStatusAccepted}).BootNotification); err != nil {
-		t.Fatal(err)
-	}
-	if err := profile.HandleBootNotificationAfter(func(context.Context, *csms.Session, v16.BootNotificationRequest, v16.BootNotificationConfirmation) error {
-		return errors.New("diagnostic failure")
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := profile.HandleBootNotificationAfter(func(context.Context, *csms.Session, v16.BootNotificationRequest, v16.BootNotificationConfirmation) error {
-		panic("after handler panic")
-	}); err != nil {
-		t.Fatal(err)
-	}
-	afterErrors := make(chan error, 2)
-	for _, setting := range []v16.ChangeConfigurationRequest{
-		{Key: "HeartbeatInterval", Value: "300"},
-		{Key: "WebSocketPingInterval", Value: "60"},
-	} {
-		setting := setting
-		if err := profile.HandleBootNotificationAfter(func(ctx context.Context, session *csms.Session, _ v16.BootNotificationRequest, confirmation v16.BootNotificationConfirmation) error {
-			if confirmation.Status != v16.BootNotificationConfirmationStatusAccepted {
-				return fmt.Errorf("BootNotification status = %q", confirmation.Status)
-			}
-			_, err := profile.CallChangeConfiguration(ctx, session, setting)
-			afterErrors <- err
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpServer := httptest.NewServer(server)
-	defer httpServer.Close()
-	conn := dialStation(t, httpServer.URL)
-	defer conn.Close()
-
-	sendCall(t, conn, "boot-after", v16.BootNotificationRequest{ChargePointVendor: "Example", ChargePointModel: "AC-22K"})
-	if message := readMessage(t, conn); message.Type() != protocol.CallResultType {
-		t.Fatalf("first response type = %d, want BootNotification CALLRESULT", message.Type())
-	}
-	for _, wantKey := range []string{"HeartbeatInterval", "WebSocketPingInterval"} {
-		message := readMessage(t, conn)
-		call, ok := message.(protocol.Call)
-		if !ok || call.Action != "ChangeConfiguration" {
-			t.Fatalf("message after BootNotification = %#v, want ChangeConfiguration CALL", message)
-		}
-		var request v16.ChangeConfigurationRequest
-		if err := json.Unmarshal(call.Payload, &request); err != nil {
-			t.Fatal(err)
-		}
-		if request.Key != wantKey {
-			t.Fatalf("configuration key = %q, want %q", request.Key, wantKey)
-		}
-		sendCallResult(t, conn, call.ID, v16.ChangeConfigurationConfirmation{Status: v16.ChangeConfigurationConfirmationStatusAccepted})
-		if err := <-afterErrors; err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 

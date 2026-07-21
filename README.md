@@ -245,33 +245,6 @@ profile.HandleDataTransfer(dataTransferHandler)
 BootNotification 결과가 `Accepted`가 되기 전에는 다른 OCPP 1.6 inbound Action이
 `ProtocolError`로 거부됩니다.
 
-BootNotificationConfirmation이 실제 전송된 뒤 초기 설정을 내려야 한다면 After
-handler를 등록합니다. 같은 Action에 여러 개를 등록할 수 있고 등록 순서대로 실행되므로,
-설정별 또는 모듈별로 나눌 수 있습니다.
-
-```go
-profile.HandleBootNotificationAfter(func(
-    ctx context.Context,
-    session *csms.Session,
-    request v16.BootNotificationRequest,
-    confirmation v16.BootNotificationConfirmation,
-) error {
-    if confirmation.Status != v16.BootNotificationConfirmationStatusAccepted {
-        return nil
-    }
-    callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-    defer cancel()
-    _, err := profile.CallChangeConfiguration(callCtx, session,
-        v16.ChangeConfigurationRequest{Key: "HeartbeatInterval", Value: "300"})
-    return err
-})
-```
-
-After handler는 해당 세션의 inbound handler 슬롯을 점유한 채 동기·순차 실행됩니다.
-각 outbound CALL에 짧은 개별 deadline을 설정하고, timeout은 callback 수만큼 누적될 수
-있으므로 callback 개수와 callback 안의 순차 CALL 수도 작게 유지하세요. 긴 작업은
-애플리케이션이 관리하는 bounded worker queue로 넘기는 편이 안전합니다.
-
 ```go
 state := profile.State(session)
 booted := profile.IsBooted(session)
@@ -288,8 +261,6 @@ confirmation, err := profile.CallReset(ctx, session, v16.ResetRequest{
 제공되는 outbound API:
 
 - `CallDataTransfer`
-- `CallChangeConfiguration`
-- `CallGetConfiguration`
 - `CallReset`
 - `CallRemoteStartTransaction`
 - `CallRemoteStopTransaction`

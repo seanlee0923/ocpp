@@ -32,7 +32,6 @@ type StartTransactionHandler func(context.Context, *csms.Session, v16.StartTrans
 type MeterValuesHandler func(context.Context, *csms.Session, v16.MeterValuesRequest) (v16.MeterValuesConfirmation, error)
 type StopTransactionHandler func(context.Context, *csms.Session, v16.StopTransactionRequest) (v16.StopTransactionConfirmation, error)
 type DataTransferHandler func(context.Context, *csms.Session, v16.DataTransferRequest) (v16.DataTransferConfirmation, error)
-type BootNotificationAfterHandler func(context.Context, *csms.Session, v16.BootNotificationRequest, v16.BootNotificationConfirmation) error
 
 type sessionState struct {
 	registration atomic.Uint32
@@ -83,13 +82,6 @@ func (profile *Profile) HandleBootNotification(handler BootNotificationHandler) 
 	})
 }
 
-// HandleBootNotificationAfter appends a callback that runs after a successful
-// BootNotification CALLRESULT write. Multiple callbacks run in registration
-// order; their errors are diagnostic because the response is already sent.
-func (profile *Profile) HandleBootNotificationAfter(handler BootNotificationAfterHandler) error {
-	return csms.HandleAfter(profile.router, csms.TypedAfterHandler[v16.BootNotificationRequest, v16.BootNotificationConfirmation](handler))
-}
-
 func (profile *Profile) HandleHeartbeat(handler HeartbeatHandler) error {
 	return csms.Handle(profile.router, csms.TypedHandler[v16.HeartbeatRequest, v16.HeartbeatConfirmation](handler))
 }
@@ -128,14 +120,6 @@ func (profile *Profile) HandleDataTransfer(handler DataTransferHandler) error {
 
 func (profile *Profile) CallDataTransfer(ctx context.Context, session *csms.Session, request v16.DataTransferRequest) (v16.DataTransferConfirmation, error) {
 	return callBooted[v16.DataTransferRequest, v16.DataTransferConfirmation](profile, ctx, session, request)
-}
-
-func (profile *Profile) CallChangeConfiguration(ctx context.Context, session *csms.Session, request v16.ChangeConfigurationRequest) (v16.ChangeConfigurationConfirmation, error) {
-	return callBooted[v16.ChangeConfigurationRequest, v16.ChangeConfigurationConfirmation](profile, ctx, session, request)
-}
-
-func (profile *Profile) CallGetConfiguration(ctx context.Context, session *csms.Session, request v16.GetConfigurationRequest) (v16.GetConfigurationConfirmation, error) {
-	return callBooted[v16.GetConfigurationRequest, v16.GetConfigurationConfirmation](profile, ctx, session, request)
 }
 
 func (profile *Profile) CallReset(ctx context.Context, session *csms.Session, request v16.ResetRequest) (v16.ResetConfirmation, error) {

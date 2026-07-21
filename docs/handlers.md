@@ -41,19 +41,6 @@ return confirmation, &csms.CallError{
 }
 ```
 
-성공한 CALLRESULT가 WebSocket에 기록된 뒤 후속 작업이 필요하면 `csms.HandleAfter`를
-사용한다. 동일 Action에 여러 callback을 등록할 수 있고 등록 순서대로 실행된다. 각
-callback에는 세션과 `Config.CallTimeout`에 연결된 새 context가 주어진다. error 또는
-panic은 `LogCallAfterFailed`로 기록되고 다음 callback은 계속 실행된다. 이미 응답을 보낸
-뒤이므로 After 오류를 CALLERROR로 바꿀 수는 없다. main handler 오류나 response write
-실패 시에는 After가 실행되지 않는다.
-
-After는 main handler를 실행한 것과 같은 goroutine에서 동기·순차 실행되어 해당 세션의
-`MaxConcurrentHandlers` 슬롯 하나를 계속 점유한다. callback마다 새 `CallTimeout` 예산을
-받으므로 여러 callback 또는 callback 내부의 여러 blocking CALL은 timeout이 합산될 수 있다.
-각 CALL에 더 짧은 deadline을 설정하더라도 누적 구조는 그대로이므로 callback과 순차 CALL
-개수를 작게 유지한다. 긴 작업은 애플리케이션 소유의 bounded worker queue로 전달한다.
-
 OCPP 2.1 SEND는 `csms.HandleSend`로 등록한다. SEND에는 프로토콜 응답이 없으므로 validation
 또는 handler 오류는 `csms.Logger`와 `csms.Metrics`(`MetricSendDropped`)로만 관찰할 수 있다.
 

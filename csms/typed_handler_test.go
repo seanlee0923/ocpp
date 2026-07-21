@@ -105,66 +105,6 @@ func TestTypedHandlerRejectsMismatchedTypes(t *testing.T) {
 	}
 }
 
-func TestTypedAfterHandlerRejectsMismatchedTypes(t *testing.T) {
-	err := HandleAfter(NewRouter(), func(context.Context, *Session, v16.BootNotificationRequest, v201.BootNotificationConfirmation) error {
-		return nil
-	})
-	if !errors.Is(err, ErrInvalidHandlerRegistration) {
-		t.Fatalf("HandleAfter error = %v, want ErrInvalidHandlerRegistration", err)
-	}
-}
-
-func TestTypedAfterHandlerRejectsInvalidRegistration(t *testing.T) {
-	handler := func(context.Context, *Session, v16.BootNotificationRequest, v16.BootNotificationConfirmation) error {
-		return nil
-	}
-	if err := HandleAfter(nil, handler); !errors.Is(err, ErrInvalidHandlerRegistration) {
-		t.Fatalf("nil router error = %v", err)
-	}
-	var nilHandler TypedAfterHandler[v16.BootNotificationRequest, v16.BootNotificationConfirmation]
-	if err := HandleAfter(NewRouter(), nilHandler); !errors.Is(err, ErrInvalidHandlerRegistration) {
-		t.Fatalf("nil handler error = %v", err)
-	}
-	if err := HandleAfter(NewRouter(), func(context.Context, *Session, *v16.BootNotificationRequest, v16.BootNotificationConfirmation) error {
-		return nil
-	}); !errors.Is(err, ErrInvalidHandlerRegistration) {
-		t.Fatalf("pointer request error = %v", err)
-	}
-	if err := HandleAfter(NewRouter(), func(context.Context, *Session, v16.BootNotificationConfirmation, v16.BootNotificationRequest) error {
-		return nil
-	}); !errors.Is(err, ErrInvalidHandlerRegistration) {
-		t.Fatalf("reversed directions error = %v", err)
-	}
-	if err := HandleAfter(NewRouter(), func(context.Context, *Session, v16.BootNotificationRequest, v16.HeartbeatConfirmation) error {
-		return nil
-	}); !errors.Is(err, ErrInvalidHandlerRegistration) {
-		t.Fatalf("mismatched action error = %v", err)
-	}
-}
-
-func TestTypedAfterHandlerDecodesAndPropagatesErrors(t *testing.T) {
-	router := NewRouter()
-	wantErr := errors.New("after failed")
-	if err := HandleAfter(router, func(_ context.Context, _ *Session, request v16.BootNotificationRequest, confirmation v16.BootNotificationConfirmation) error {
-		if request.ChargePointVendor != "Example" || confirmation.Status != v16.BootNotificationConfirmationStatusAccepted {
-			t.Fatalf("request = %#v, confirmation = %#v", request, confirmation)
-		}
-		return wantErr
-	}); err != nil {
-		t.Fatal(err)
-	}
-	handler := router.lookupAfter(protocol.OCPP16, "BootNotification")[0]
-	if err := handler(context.Background(), nil, json.RawMessage(`{"chargePointVendor":"Example","chargePointModel":"AC-22K"}`), validV16BootConfirmation()); !errors.Is(err, wantErr) {
-		t.Fatalf("callback error = %v, want %v", err, wantErr)
-	}
-	if err := handler(context.Background(), nil, json.RawMessage(`{`), validV16BootConfirmation()); err == nil {
-		t.Fatal("malformed request reached typed After handler")
-	}
-	if err := handler(context.Background(), nil, json.RawMessage(`{"chargePointVendor":"Example","chargePointModel":"AC-22K"}`), v16.HeartbeatConfirmation{}); err == nil {
-		t.Fatal("wrong confirmation type reached typed After handler")
-	}
-}
-
 func TestTypedHandlerRejectsInvalidConfirmation(t *testing.T) {
 	router := NewRouter()
 	err := Handle(router, func(_ context.Context, _ *Session, _ v16.BootNotificationRequest) (v16.BootNotificationConfirmation, error) {

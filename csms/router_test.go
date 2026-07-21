@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -158,57 +157,5 @@ func TestTypedHandlePropagatesDuplicateRegistration(t *testing.T) {
 	}
 	if err := Handle(router, handler); !errors.Is(err, ErrHandlerAlreadyRegistered) {
 		t.Fatalf("duplicate typed registration error = %v", err)
-	}
-}
-
-func TestRouterAllowsMultipleAfterHandlersInRegistrationOrder(t *testing.T) {
-	router := NewRouter()
-	var order []int
-	for index := 1; index <= 3; index++ {
-		index := index
-		if err := router.HandleAfter(protocol.OCPP16, "BootNotification", func(context.Context, *Session, json.RawMessage, any) error {
-			order = append(order, index)
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	after := router.lookupAfter(protocol.OCPP16, "BootNotification")
-	for _, handler := range after {
-		handler(context.Background(), nil, nil, nil)
-	}
-	if got := fmt.Sprint(order); got != "[1 2 3]" {
-		t.Fatalf("After handler order = %s, want [1 2 3]", got)
-	}
-}
-
-func TestRouterHandleAfterRejectsInvalidRegistration(t *testing.T) {
-	handler := func(context.Context, *Session, json.RawMessage, any) error { return nil }
-	tests := []struct {
-		name    string
-		router  *Router
-		version protocol.Version
-		action  string
-		handler AfterHandler
-	}{
-		{"nil router", nil, protocol.OCPP16, "BootNotification", handler},
-		{"unknown version", NewRouter(), protocol.Version("ocpp3.0"), "BootNotification", handler},
-		{"empty action", NewRouter(), protocol.OCPP16, "", handler},
-		{"long action", NewRouter(), protocol.OCPP16, strings.Repeat("a", protocol.MaxActionLength+1), handler},
-		{"nil handler", NewRouter(), protocol.OCPP16, "BootNotification", nil},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if err := test.router.HandleAfter(test.version, test.action, test.handler); !errors.Is(err, ErrInvalidHandlerRegistration) {
-				t.Fatalf("HandleAfter error = %v", err)
-			}
-		})
-	}
-}
-
-func TestNilRouterLookupAfterReturnsNoHandlers(t *testing.T) {
-	var router *Router
-	if handlers := router.lookupAfter(protocol.OCPP16, "BootNotification"); handlers != nil {
-		t.Fatalf("lookupAfter on nil router = %#v", handlers)
 	}
 }

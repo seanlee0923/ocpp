@@ -20,54 +20,6 @@ type TypedHandler[Request protocol.Payload, Confirmation protocol.Payload] func(
 
 type TypedSendHandler[Request protocol.Payload] func(context.Context, *Session, Request) error
 
-// TypedAfterHandler observes a successfully answered CALL after its
-// CALLRESULT has been written to the peer.
-type TypedAfterHandler[Request protocol.Payload, Confirmation protocol.Payload] func(
-	context.Context,
-	*Session,
-	Request,
-	Confirmation,
-) error
-
-// HandleAfter registers a type-safe post-response callback. Multiple
-// callbacks for the same action are allowed and run in registration order.
-func HandleAfter[Request protocol.Payload, Confirmation protocol.Payload](
-	router *Router,
-	handler TypedAfterHandler[Request, Confirmation],
-) error {
-	if router == nil {
-		return fmt.Errorf("%w: router is nil", ErrInvalidHandlerRegistration)
-	}
-	if handler == nil {
-		return fmt.Errorf("%w: handler is nil", ErrInvalidHandlerRegistration)
-	}
-	var request Request
-	var confirmation Confirmation
-	if isNilType(request) || isNilType(confirmation) {
-		return fmt.Errorf("%w: request and confirmation type parameters must be non-pointer generated payloads", ErrInvalidHandlerRegistration)
-	}
-	if request.Direction() != protocol.RequestPayload || confirmation.Direction() != protocol.ConfirmationPayload {
-		return fmt.Errorf("%w: typed after handler requires a request followed by a confirmation", ErrInvalidHandlerRegistration)
-	}
-	if request.Version() != confirmation.Version() {
-		return fmt.Errorf("%w: request version %s does not match confirmation version %s", ErrInvalidHandlerRegistration, request.Version(), confirmation.Version())
-	}
-	if request.ActionName() != confirmation.ActionName() {
-		return fmt.Errorf("%w: request action %s does not match confirmation action %s", ErrInvalidHandlerRegistration, request.ActionName(), confirmation.ActionName())
-	}
-	return router.HandleAfter(request.Version(), request.ActionName(), func(ctx context.Context, session *Session, raw json.RawMessage, response any) error {
-		var decoded Request
-		if err := json.Unmarshal(raw, &decoded); err != nil {
-			return fmt.Errorf("decode request for after handler: %w", err)
-		}
-		result, ok := response.(Confirmation)
-		if !ok {
-			return fmt.Errorf("confirmation for after handler has type %T", response)
-		}
-		return handler(ctx, session, decoded, result)
-	})
-}
-
 // HandleSend registers an OCPP 2.1 SEND handler. SEND is unconfirmed, so an
 // error returned by the handler is not written back to the Charging Station.
 func HandleSend[Request protocol.Payload](router *Router, handler TypedSendHandler[Request]) error {

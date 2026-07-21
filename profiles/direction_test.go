@@ -20,14 +20,12 @@ func TestProfileWrapperDirections(t *testing.T) {
 		name     string
 		profile  any
 		inbound  []string
-		after    []string
 		outbound []string
 	}{
 		{
 			name: "OCPP 1.6", profile: (*ocpp16.Profile)(nil),
 			inbound:  []string{"Authorize", "BootNotification", "DataTransfer", "Heartbeat", "MeterValues", "StartTransaction", "StatusNotification", "StopTransaction"},
-			after:    []string{"BootNotification"},
-			outbound: []string{"ChangeAvailability", "ChangeConfiguration", "DataTransfer", "GetConfiguration", "RemoteStartTransaction", "RemoteStopTransaction", "Reset", "TriggerMessage", "UnlockConnector"},
+			outbound: []string{"ChangeAvailability", "DataTransfer", "RemoteStartTransaction", "RemoteStopTransaction", "Reset", "TriggerMessage", "UnlockConnector"},
 		},
 		{
 			name: "OCPP 2.0.1", profile: (*ocpp201.Profile)(nil),
@@ -57,27 +55,24 @@ func TestProfileWrapperDirections(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			gotInbound, gotAfter, gotOutbound := wrapperNames(reflect.TypeOf(test.profile))
+			gotInbound, gotOutbound := wrapperNames(reflect.TypeOf(test.profile))
 			assertNames(t, "inbound Handle wrappers", gotInbound, test.inbound)
-			assertNames(t, "post-response HandleAfter wrappers", gotAfter, test.after)
 			assertNames(t, "outbound Call wrappers", gotOutbound, test.outbound)
 		})
 	}
 }
 
-func wrapperNames(profile reflect.Type) (inbound, after, outbound []string) {
+func wrapperNames(profile reflect.Type) (inbound, outbound []string) {
 	for i := 0; i < profile.NumMethod(); i++ {
 		name := profile.Method(i).Name
 		switch {
-		case strings.HasPrefix(name, "Handle") && strings.HasSuffix(name, "After"):
-			after = append(after, strings.TrimSuffix(strings.TrimPrefix(name, "Handle"), "After"))
 		case strings.HasPrefix(name, "Handle"):
 			inbound = append(inbound, strings.TrimPrefix(name, "Handle"))
 		case strings.HasPrefix(name, "Call"):
 			outbound = append(outbound, strings.TrimPrefix(name, "Call"))
 		}
 	}
-	return inbound, after, outbound
+	return inbound, outbound
 }
 
 func assertNames(t *testing.T, label string, got, want []string) {
