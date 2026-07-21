@@ -43,3 +43,50 @@ timeout, 취소, `MaxPendingCalls` 초과 거부)가 `MetricOutboundCallSent`/`C
 
 BootNotification 이후 실제 session으로 Reset을 호출하는 흐름은
 [`examples/outbound-call`](../examples/outbound-call)에 있다.
+
+## OCPP handler 밖에서 identity로 호출하기
+
+HTTP 요청, message queue 또는 scheduler처럼 OCPP handler 밖에서 이벤트를 받는 경우
+`*csms.Session`을 별도 map이나 DB에 장기 저장하지 않는다. 재연결되면 같은 identity에도
+새 `Session`이 등록되므로, CALL 직전에 `Server.Session(identity)`로 현재 연결을 조회한다.
+
+```go
+type application struct {
+    server  *csms.Server
+    profile *ocpp16.Profile
+}
+
+func (app *application) dataTransfer(w http.ResponseWriter, r *http.Request) {
+    cpid := r.PathValue("cpid")
+    session, ok := app.server.Session(cpid)
+    if !ok {
+        http.Error(w, "charging station is not connected", http.StatusNotFound)
+        return
+    }
+
+    ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+    defer cancel()
+    confirmation, err := app.profile.CallDataTransfer(
+        ctx,
+        session,
+        v16.DataTransferRequest{VendorID: "com.example"},
+    )
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusBadGateway)
+        return
+    }
+    json.NewEncoder(w).Encode(confirmation)
+}
+
+mux.HandleFunc("POST /stations/{cpid}/data-transfer", app.dataTransfer)
+```
+
+`Session` 조회 성공과 CALL 완료 사이에도 연결은 끊기거나 동일 identity의 새 연결로
+교체될 수 있다. 따라서 `ErrSessionClosed`, `ErrSessionReplaced`, context timeout과
+`*RemoteCallError`는 정상적인 운영 오류로 처리해야 한다. Profile method를 사용하면 해당
+profile의 정책도 적용된다. 예를 들어 OCPP 1.6 `Profile.CallDataTransfer`는 accepted
+BootNotification 이전에 `ocpp16.ErrNotBooted`를 반환한다.
+
+OCPP WebSocket 서버(`:8080`)와 외부 HTTP API(`:8081`)를 함께 실행하고 JSON body를
+OCPP 1.6 `DataTransfer`로 전달하는 전체 예제는
+[`examples/external-data-transfer`](../examples/external-data-transfer)에 있다.

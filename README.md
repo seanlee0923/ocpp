@@ -111,6 +111,17 @@ Sec-WebSocket-Protocol: ocpp1.6
 같은 코드는 [`examples/ocpp16-csms`](examples/ocpp16-csms)에서 실행 가능한 형태로
 제공합니다.
 
+OCPP handler 밖의 HTTP API나 queue event에서 identity로 현재 세션을 조회해 CALL을
+보내는 예제는 [`examples/external-data-transfer`](examples/external-data-transfer)에
+있습니다. 예제를 실행하면 충전기는 `ws://localhost:8080/{cpid}`에 연결하고, 외부에서는
+다음처럼 OCPP 1.6 `DataTransfer`를 요청합니다.
+
+```sh
+curl -X POST http://localhost:8081/stations/CP-001/data-transfer \
+  -H 'Content-Type: application/json' \
+  -d '{"vendorId":"com.example","messageId":"Sync","data":"{\"enabled\":true}"}'
+```
+
 ## 메시지 타입
 
 버전별 타입은 `req`, `conf` 하위 패키지 없이 단일 패키지에 있습니다.

@@ -113,6 +113,18 @@ Sec-WebSocket-Protocol: ocpp1.6
 The same code is available as a runnable example in
 [`examples/ocpp16-csms`](examples/ocpp16-csms).
 
+[`examples/external-data-transfer`](examples/external-data-transfer) shows
+how an HTTP API or queue event outside the OCPP handler flow can look up the
+current session by identity and initiate a CALL. Run it, connect the Charging
+Station to `ws://localhost:8080/{cpid}`, then request an OCPP 1.6
+`DataTransfer` externally:
+
+```sh
+curl -X POST http://localhost:8081/stations/CP-001/data-transfer \
+  -H 'Content-Type: application/json' \
+  -d '{"vendorId":"com.example","messageId":"Sync","data":"{\"enabled\":true}"}'
+```
+
 ## Message types
 
 Types per version live in a single package each, with no `req`/`conf`
