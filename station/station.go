@@ -615,7 +615,7 @@ func (s *Station) dial(ctx context.Context) (*stationConn, error) {
 // blocking ReadMessage call in readLoop unblocks. Returns the read loop's
 // error; callers should still check ctx/stopCh afterward, since a forced
 // close surfaces as a generic network error here, not ctx.Err().
-func (s *Station) runConnection(ctx context.Context, conn *stationConn) error {
+func (s *Station) runConnection(ctx context.Context, conn *stationConn) (err error) {
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -626,9 +626,18 @@ func (s *Station) runConnection(ctx context.Context, conn *stationConn) error {
 		case <-done:
 		}
 	}()
-	err := s.readLoop(conn)
-	close(done)
-	return err
+	defer close(done)
+	// Run is typically launched by the caller as `go st.Run(ctx)`, with no
+	// recover of its own anywhere up that goroutine's stack — an
+	// unrecovered panic in readLoop (ReadMessage, Decode, ...) would crash
+	// the whole process instead of just ending this one connection.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("station: read loop panicked: %v", r)
+		}
+	}()
+	err = s.readLoop(conn)
+	return
 }
 
 func (s *Station) readLoop(conn *stationConn) error {

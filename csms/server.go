@@ -325,8 +325,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go session.idleLoop()
 	readResult := make(chan error, 1)
 	go func() {
+		defer close(session.readDone)
+		// This goroutine is not covered by net/http's per-request panic
+		// recovery: that only protects code running synchronously inside
+		// ServeHTTP's own call frame (like callOnConnect below), never a
+		// goroutine ServeHTTP spawns. An unrecovered panic here — in
+		// ReadMessage, markReceived, or protocol.Decode, none of which run
+		// inside handleCall/handleSend's own recover — would crash the
+		// entire process, disconnecting every session, not just this one.
+		defer func() {
+			if r := recover(); r != nil {
+				readResult <- fmt.Errorf("csms: session read loop panicked: %v", r)
+			}
+		}()
 		readResult <- s.readLoop(session)
-		close(session.readDone)
 	}()
 	s.callOnConnect(session)
 	err = <-readResult
