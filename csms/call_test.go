@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -158,6 +159,40 @@ func TestCallWithCanceledContextDoesNotWriteFrame(t *testing.T) {
 	if _, data, err := conn.ReadMessage(); err == nil {
 		t.Fatalf("peer received frame %s after Call context was already canceled", data)
 	}
+}
+
+// TestSendRechecksContextAfterWaitingForWriteLock covers cancellation that
+// happens after send's initial ctx check but while another writer owns the
+// WebSocket write lock. The second check must return before touching conn.
+func TestSendRechecksContextAfterWaitingForWriteLock(t *testing.T) {
+	base, cancel := context.WithCancel(context.Background())
+	ctx := &firstErrObservedContext{Context: base, observed: make(chan struct{})}
+	session := &Session{}
+	session.writeMu.Lock()
+
+	result := make(chan error, 1)
+	go func() {
+		result <- session.send(ctx, protocol.Call{ID: "1", Action: "Reset", Payload: []byte(`{"type":"Soft"}`)})
+	}()
+
+	<-ctx.observed
+	cancel()
+	session.writeMu.Unlock()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("send error = %v, want context.Canceled", err)
+	}
+}
+
+type firstErrObservedContext struct {
+	context.Context
+	once     sync.Once
+	observed chan struct{}
+}
+
+func (ctx *firstErrObservedContext) Err() error {
+	err := ctx.Context.Err()
+	ctx.once.Do(func() { close(ctx.observed) })
+	return err
 }
 
 func TestCallConvertsUniqueIDGeneratorPanicToError(t *testing.T) {
