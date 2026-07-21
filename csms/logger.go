@@ -23,6 +23,7 @@ const (
 	LogCallReceived        LogEvent = "call.received"
 	LogCallCompleted       LogEvent = "call.completed"
 	LogCallRejected        LogEvent = "call.rejected"
+	LogCallAfterFailed     LogEvent = "call.after_failed"
 	LogSendReceived        LogEvent = "send.received"
 	LogSendCompleted       LogEvent = "send.completed"
 	LogSendDropped         LogEvent = "send.dropped"

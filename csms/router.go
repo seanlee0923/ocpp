@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/seanlee0923/ocpp/protocol"
@@ -17,6 +18,12 @@ var (
 )
 
 type Handler func(context.Context, *Session, json.RawMessage) (any, error)
+
+// AfterHandler runs after a CALLRESULT has been written successfully. The
+// request is the original CALL payload and confirmation is the value returned
+// by the main handler. Its error is diagnostic only because the peer has
+// already received the successful response.
+type AfterHandler func(context.Context, *Session, json.RawMessage, any) error
 
 type Middleware func(protocol.Version, string, Handler) Handler
 
@@ -39,6 +46,8 @@ type routerEntry struct {
 type Router struct {
 	mu         sync.RWMutex
 	handlers   map[protocol.Version]map[string]routerEntry
+	after      map[protocol.Version]map[string][]AfterHandler
+	hasAfter   atomic.Bool
 	middleware []Middleware
 }
 
@@ -71,6 +80,34 @@ func (r *Router) Handle(version protocol.Version, action string, handler Handler
 // can reach a handler registered this way.
 func (r *Router) HandleSend(version protocol.Version, action string, handler Handler) error {
 	return r.register(version, action, handler, sendKind)
+}
+
+// HandleAfter appends a callback that runs after a successful CALLRESULT write.
+// An action may have multiple callbacks; they run in registration order.
+func (r *Router) HandleAfter(version protocol.Version, action string, handler AfterHandler) error {
+	if r == nil {
+		return fmt.Errorf("%w: router is nil", ErrInvalidHandlerRegistration)
+	}
+	if !version.Valid() {
+		return fmt.Errorf("%w: unsupported OCPP version %q", ErrInvalidHandlerRegistration, version)
+	}
+	if utf8.RuneCountInString(action) == 0 || utf8.RuneCountInString(action) > protocol.MaxActionLength {
+		return fmt.Errorf("%w: action must contain 1 to %d characters", ErrInvalidHandlerRegistration, protocol.MaxActionLength)
+	}
+	if handler == nil {
+		return fmt.Errorf("%w: handler is nil", ErrInvalidHandlerRegistration)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.after == nil {
+		r.after = make(map[protocol.Version]map[string][]AfterHandler)
+	}
+	if r.after[version] == nil {
+		r.after[version] = make(map[string][]AfterHandler)
+	}
+	r.after[version][action] = append(r.after[version][action], handler)
+	r.hasAfter.Store(true)
+	return nil
 }
 
 func (r *Router) register(version protocol.Version, action string, handler Handler, kind messageKind) error {
@@ -124,4 +161,14 @@ func (r *Router) lookup(version protocol.Version, action string, kind messageKin
 		}
 	}
 	return handler, true
+}
+
+func (r *Router) lookupAfter(version protocol.Version, action string) []AfterHandler {
+	if r == nil || !r.hasAfter.Load() {
+		return nil
+	}
+	r.mu.RLock()
+	handlers := append([]AfterHandler(nil), r.after[version][action]...)
+	r.mu.RUnlock()
+	return handlers
 }

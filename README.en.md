@@ -260,6 +260,35 @@ profile.HandleDataTransfer(dataTransferHandler)
 Before BootNotification results in `Accepted`, any other OCPP 1.6 inbound
 Action is rejected with `ProtocolError`.
 
+Register an After handler when initial settings must be sent only after the
+BootNotificationConfirmation has actually been written. Multiple callbacks
+for the same Action are allowed and run in registration order, so they may be
+split by setting or application module.
+
+```go
+profile.HandleBootNotificationAfter(func(
+    ctx context.Context,
+    session *csms.Session,
+    request v16.BootNotificationRequest,
+    confirmation v16.BootNotificationConfirmation,
+) error {
+    if confirmation.Status != v16.BootNotificationConfirmationStatusAccepted {
+        return nil
+    }
+    callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+    defer cancel()
+    _, err := profile.CallChangeConfiguration(callCtx, session,
+        v16.ChangeConfigurationRequest{Key: "HeartbeatInterval", Value: "300"})
+    return err
+})
+```
+
+After handlers run synchronously and sequentially while holding an inbound
+handler slot for that session. Give every outbound CALL a short individual
+deadline, and keep both the callback count and sequential CALL count small
+because those deadlines can accumulate. Send long-running work to an
+application-owned bounded worker queue.
+
 ```go
 state := profile.State(session)
 booted := profile.IsBooted(session)
@@ -276,6 +305,8 @@ confirmation, err := profile.CallReset(ctx, session, v16.ResetRequest{
 Provided outbound API:
 
 - `CallDataTransfer`
+- `CallChangeConfiguration`
+- `CallGetConfiguration`
 - `CallReset`
 - `CallRemoteStartTransaction`
 - `CallRemoteStopTransaction`

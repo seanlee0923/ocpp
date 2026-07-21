@@ -70,6 +70,25 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   handler/hook은 반드시 빠르게 반환해야 한다"는 계약을 명시했다. `OnConnect`/
   `OnDisconnect`/`OnDuplicateSession`, `Authenticator`/`HandshakeLimiter`,
   `Metrics.Record`가 각각 멈췄을 때 정확히 어디까지 영향을 주는지도 정리했다.
+- `Router.HandleAfter`와 제네릭 `csms.HandleAfter[Request, Confirmation]` —
+  성공한 CALLRESULT가 WebSocket에 실제로 기록된 뒤에만 실행되는 post-response
+  callback. 동일 `version + action`에 여러 callback을 등록할 수 있고 등록
+  순서대로 실행된다. 각 callback은 세션과 `Config.CallTimeout`에 연결된 새
+  context를 받으며, error나 panic은 `LogCallAfterFailed`(`after_handler_error`/
+  `after_handler_panic`)로 격리되어 이후 callback 실행에 영향을 주지 않는다.
+  이미 응답을 보낸 뒤이므로 After 실패를 CALLERROR로 바꾸지는 않으며, main
+  handler 오류나 response write 실패 시에는 After가 실행되지 않는다. After
+  callback은 main handler를 실행한 것과 같은 goroutine에서 동기·순차 실행되어
+  해당 세션의 `MaxConcurrentHandlers` 슬롯 하나를 계속 점유하고, callback마다
+  새 `CallTimeout` 예산을 받는다 — 그래서 callback 안에서 blocking outbound
+  CALL을 여러 번 체이닝하면 timeout이 단일 `CallTimeout`을 훌쩍 넘어 누적될 수
+  있다. 이를 `docs/handlers.md`와 `docs/production.md`에 명시했다: 각 CALL에
+  짧은 개별 deadline을 쓰고 callback/CALL 개수를 작게 유지하며, 긴 작업은
+  애플리케이션이 관리하는 bounded worker queue로 넘긴다.
+- OCPP 1.6 profile: BootNotificationConfirmation 전송 뒤 실행되는 typed After
+  callback `HandleBootNotificationAfter`와, 다른 `Call<Action>`처럼 accepted
+  BootNotification을 요구하는 outbound convenience call
+  `CallChangeConfiguration`/`CallGetConfiguration`을 추가했다.
 
 ### Fixed
 

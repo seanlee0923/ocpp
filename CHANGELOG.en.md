@@ -79,6 +79,29 @@ the same major version.
   promptly." Spells out exactly how far the impact reaches when
   `OnConnect`/`OnDisconnect`/`OnDuplicateSession`,
   `Authenticator`/`HandshakeLimiter`, or `Metrics.Record` each hang.
+- `Router.HandleAfter` and generic `csms.HandleAfter[Request, Confirmation]`
+  — post-response callbacks that run only after a successful CALLRESULT has
+  actually been written to the WebSocket. Multiple callbacks may be
+  registered for the same `version + action` and run in registration order.
+  Each receives a fresh context bound to the session and `Config.CallTimeout`;
+  an error or panic is isolated as `LogCallAfterFailed`
+  (`after_handler_error`/`after_handler_panic`) without stopping later
+  callbacks. Since the response was already sent, an After failure cannot be
+  converted to a CALLERROR, and After does not run when the main handler
+  fails or the response write fails. After callbacks run synchronously and
+  sequentially in the same goroutine that ran the main handler, continuing to
+  occupy one `MaxConcurrentHandlers` slot for that session, and each callback
+  gets its own fresh `CallTimeout` budget — so chaining several blocking
+  outbound CALLs inside one or more callbacks can accumulate timeouts well
+  past a single `CallTimeout`. Documented this in `docs/handlers.md` and
+  `docs/production.md`: give each CALL a short individual deadline and keep
+  callback/CALL counts small; send long work to an application-owned bounded
+  worker queue.
+- OCPP 1.6 profile: `HandleBootNotificationAfter` (a typed After callback
+  that runs once the BootNotificationConfirmation has been written) and the
+  `CallChangeConfiguration`/`CallGetConfiguration` outbound convenience
+  calls, both gated behind an accepted BootNotification like the other
+  `Call<Action>` methods.
 
 ### Fixed
 
