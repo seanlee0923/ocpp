@@ -719,6 +719,73 @@ func TestStationHandlerContextCanceledOnDisconnect(t *testing.T) {
 	}
 }
 
+// TestStationDisconnectWaitsForInFlightHandler proves the ordinary
+// disconnect path waits for a dispatch-spawned handler to actually return
+// before OnDisconnect fires. Canceling the handler ctx alone is insufficient:
+// application code may need a brief cleanup window before a reconnect starts
+// another handler for the same Station.
+func TestStationDisconnectWaitsForInFlightHandler(t *testing.T) {
+	connected := make(chan *csms.Session, 1)
+	server, err := csms.New(csms.Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *csms.Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	handlerEntered := make(chan struct{})
+	release := make(chan struct{})
+	disconnected := make(chan struct{}, 1)
+	st, err := station.New(station.Config{
+		URL: wsURL(httpServer.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		OnDisconnect: func(*station.Station, error) { disconnected <- struct{}{} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	waitConnected(t, st)
+	if err := station.Handle(st, func(context.Context, v16.ResetRequest) (v16.ResetConfirmation, error) {
+		close(handlerEntered)
+		<-release
+		return v16.ResetConfirmation{Status: v16.ResetConfirmationStatusAccepted}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session := <-connected
+	go func() {
+		_, _ = csms.Call[v16.ResetRequest, v16.ResetConfirmation](
+			context.Background(), session, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+		)
+	}()
+	select {
+	case <-handlerEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler was never invoked")
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-disconnected:
+		close(release)
+		t.Fatal("OnDisconnect fired before the in-flight handler returned")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-disconnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnDisconnect did not fire after the in-flight handler returned")
+	}
+}
+
 // TestStationHandlerContextCanceledOnCallTimeout proves an inbound
 // handler's ctx is bounded by Config.CallTimeout on its own — a handler
 // that never returns cannot occupy its handlerSlots slot for the whole

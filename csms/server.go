@@ -211,6 +211,20 @@ func New(config Config) (*Server, error) {
 	return server, nil
 }
 
+// disconnectHandlerGrace bounds how long ServeHTTP's ordinary disconnect
+// path (a dropped connection, not Shutdown) waits for a session's in-flight
+// CALL/SEND handler goroutines to actually exit before unregistering the
+// session and calling OnDisconnect. session.ctx is already canceled by the
+// time this wait starts, so a well-behaved handler (one that respects ctx,
+// as documented) typically returns almost immediately — this grace period
+// only matters for narrowing, not eliminating, the window where a fast
+// reconnect for the same identity could otherwise start a new session
+// while a handler from the just-closed one is still running and touching
+// whatever per-identity state the application keeps. Deliberately much
+// shorter than CallTimeout: this fires on every ordinary disconnect, not
+// just Shutdown, so it must not make routine disconnects noticeably slow.
+const disconnectHandlerGrace = 5 * time.Second
+
 // ServeHTTP accepts /{chargePointIdentity} and negotiates an OCPP subprotocol.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.shuttingDown.Load() {
@@ -350,6 +364,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.callOnConnect(session)
 	err = <-readResult
 	_ = session.closeWithError(err)
+	graceCtx, graceCancel := context.WithTimeout(context.Background(), disconnectHandlerGrace)
+	_ = session.waitHandlers(graceCtx)
+	graceCancel()
 	s.unregisterSession(session)
 	// session.Err() (not the raw readLoop return above) is the true cause:
 	// closeWithError only ever applies the *first* cause it's given

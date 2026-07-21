@@ -26,6 +26,19 @@ const defaultMaxConcurrentHandlers = 16
 const defaultWriteTimeout = 10 * time.Second
 const defaultReadLimit = 1 << 20 // 1MB, matching csms.Config.ReadLimit's default
 
+// disconnectHandlerGrace bounds how long Run waits, after a connection
+// ends, for that connection's in-flight dispatch-spawned handler
+// goroutines to actually exit before calling OnDisconnect and moving on to
+// the next reconnect attempt. conn.ctx is already canceled by then, so a
+// well-behaved handler (one that respects ctx, as documented) typically
+// returns almost immediately — this grace period only narrows, not
+// eliminates, the window where a fast reconnect could otherwise fire
+// OnConnect (and a fresh handler invocation) while a handler from the
+// just-closed connection is still running, matching csms.Server's
+// equivalent disconnectHandlerGrace. Deliberately short: this fires on
+// every disconnect, not just a graceful shutdown.
+const disconnectHandlerGrace = 5 * time.Second
+
 var (
 	ErrNotConnected               = errors.New("station: not connected")
 	ErrStopped                    = errors.New("station: stopped")
@@ -253,6 +266,7 @@ type stationConn struct {
 	pending      map[string]chan callOutcome
 	closed       chan struct{}
 	closeOnce    sync.Once
+	handlerWG    sync.WaitGroup
 }
 
 // newStationConn derives conn's ctx from parent (Run's ctx), not
@@ -278,6 +292,23 @@ func (c *stationConn) close(cause error) {
 		}
 		_ = c.conn.Close()
 	})
+}
+
+// waitHandlers blocks until every dispatch-spawned handler goroutine for
+// this connection has exited, or ctx expires first — mirroring
+// csms.Session.waitHandlers.
+func (c *stationConn) waitHandlers(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		c.handlerWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *stationConn) registerCall(id string, maxPending int) (<-chan callOutcome, error) {
@@ -505,6 +536,9 @@ func (s *Station) Run(ctx context.Context) error {
 
 			attemptErr = s.runConnection(ctx, conn)
 			conn.close(attemptErr)
+			graceCtx, graceCancel := context.WithTimeout(context.Background(), disconnectHandlerGrace)
+			_ = conn.waitHandlers(graceCtx)
+			graceCancel()
 			s.setConn(nil)
 			s.setState(Disconnected)
 			s.callOnDisconnect(attemptErr)
@@ -721,7 +755,9 @@ func (s *Station) dispatch(conn *stationConn, call protocol.Call) {
 		})
 		return
 	}
+	conn.handlerWG.Add(1)
 	go func() {
+		defer conn.handlerWG.Done()
 		defer func() { <-s.pendingSlots }()
 		select {
 		case s.handlerSlots <- struct{}{}:

@@ -142,6 +142,62 @@ func TestOnConnectPanicDoesNotLeakSession(t *testing.T) {
 	waitForNoSession(t, server, "CP-001")
 }
 
+// TestDisconnectWaitsForInFlightHandler proves the ordinary (non-Shutdown)
+// disconnect path waits, up to disconnectHandlerGrace, for an in-flight
+// CALL handler to finish before calling OnDisconnect — narrowing the
+// window where a fast reconnect for the same identity could otherwise
+// start a new session while a handler from the just-closed one is still
+// running and touching whatever per-identity state the application keeps.
+func TestDisconnectWaitsForInFlightHandler(t *testing.T) {
+	router := NewRouter()
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	if err := router.Handle(protocol.OCPP16, "Heartbeat", func(context.Context, *Session, json.RawMessage) (any, error) {
+		started <- struct{}{}
+		<-release
+		return map[string]any{"currentTime": "2026-07-16T00:00:00Z"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	disconnected := make(chan struct{}, 1)
+	server, err := New(Config{
+		Router: router, Versions: []protocol.Version{protocol.OCPP16},
+		OnDisconnect: func(*Session, error) { disconnected <- struct{}{} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := newTestHTTPServer(t, server)
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
+	defer conn.Close()
+
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`[2,"1","Heartbeat",{}]`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not start")
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-disconnected:
+		t.Fatal("OnDisconnect fired before the in-flight handler finished")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		t.Fatal("OnDisconnect never fired after the in-flight handler finished")
+	}
+}
+
 func TestOnConnectCanPerformBlockingCall(t *testing.T) {
 	callResult := make(chan error, 1)
 	server, err := New(Config{
