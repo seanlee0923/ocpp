@@ -48,6 +48,22 @@ return confirmation, &csms.CallError{
 }
 ```
 
+Use `csms.HandleAfter` for work that must start after a successful CALLRESULT
+has been written to the WebSocket. Multiple callbacks may be registered for
+the same Action and run in registration order. Each receives a fresh context
+bound to the session and `Config.CallTimeout`. An error or panic is recorded
+as `LogCallAfterFailed`, and later callbacks continue. Since the response was
+already sent, an After failure cannot be converted to a CALLERROR. After
+callbacks do not run when the main handler fails or the response write fails.
+
+After callbacks run synchronously and sequentially in the same goroutine that
+ran the main handler, continuing to occupy one `MaxConcurrentHandlers` slot
+for that session. Every callback receives a fresh `CallTimeout` budget, so
+multiple callbacks or multiple blocking CALLs inside one callback can
+accumulate their timeouts. A shorter per-CALL deadline reduces each bound but
+not the cumulative structure; keep both callback and sequential CALL counts
+small. Send long work to an application-owned bounded worker queue.
+
 OCPP 2.1 SEND is registered with `csms.HandleSend`. Since SEND has no
 protocol response, validation or handler errors can only be observed through
 `csms.Logger` and `csms.Metrics` (`MetricSendDropped`).

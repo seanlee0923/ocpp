@@ -840,6 +840,7 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 		s.log(ctx, record)
 		metric.Type, metric.Duration = MetricCallCompleted, time.Since(start)
 		session.recordMetric(metric)
+		s.runAfterHandlers(session, call, response)
 		return
 	}
 	callError := &CallError{Code: InternalError, Description: "internal error", Details: map[string]any{}}
@@ -863,6 +864,31 @@ func (s *Server) handleCall(ctx context.Context, session *Session, call protocol
 	metric.Type, metric.Duration, metric.ErrorCode = MetricCallRejected, time.Since(start), callError.Code
 	session.recordMetric(metric)
 	_ = session.send(ctx, protocol.CallError{ID: call.ID, Code: string(callError.Code), Description: callError.Description, Details: raw})
+}
+
+func (s *Server) runAfterHandlers(session *Session, call protocol.Call, response any) {
+	for _, handler := range s.config.Router.lookupAfter(session.version, call.Action) {
+		func() {
+			ctx := session.Context()
+			if session.callTimeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, session.callTimeout)
+				defer cancel()
+			}
+			record := sessionLogRecord(session, LogError, LogCallAfterFailed)
+			record.MessageType, record.MessageID, record.Action = protocol.CallType, call.ID, call.Action
+			defer func() {
+				if recover() != nil {
+					record.Reason = "after_handler_panic"
+					s.log(ctx, record)
+				}
+			}()
+			if err := handler(ctx, session, call.Payload, response); err != nil {
+				record.Reason = "after_handler_error"
+				s.log(ctx, record)
+			}
+		}()
+	}
 }
 
 func validErrorCode(version protocol.Version, code ErrorCode) bool {

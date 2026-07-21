@@ -21,6 +21,13 @@
 limit은 잘못된 설정으로 거부된다. `Config`는 keyed field로 작성하고 handler는 전달된 context를
 DB와 외부 요청에 전파하며 무제한 background goroutine을 만들지 않는다.
 
+After handler는 CALLRESULT 전송 뒤에도 해당 세션의 `MaxConcurrentHandlers` 슬롯을 점유한
+채 등록 순서대로 동기 실행된다. callback마다 새 `CallTimeout`이 적용되므로 N개 callback의
+blocking CALL은 최악에 N배까지 누적될 수 있다. 각 CALL에 짧은 개별 deadline을 사용하고
+callback 수와 callback 내부의 순차 CALL 수도 작게 유지한다. 긴 작업은 bounded worker
+queue로 넘긴다. 슬롯이 오래 점유되면 같은 세션의 Boot 직후 StatusNotification/Heartbeat가
+지연되고 `MaxQueuedHandlers`가 가득 찰 수 있다.
+
 ## Proxy와 TLS
 
 TLS를 reverse proxy에서 종료한다면 현재 core는 proxy header를 인증된 client certificate로
