@@ -27,6 +27,56 @@ import (
 // releases that reservation, instead of permanently rejecting every future
 // connection attempt for the same identity with "connection is already
 // pending".
+// TestSecurityEventPanicDuringReplacementReleasesReservation proves a
+// panicking Security.OnEvent during a duplicate-session replacement still
+// releases the identity's reservation, instead of permanently rejecting
+// every future connection attempt for that identity with "connection is
+// already pending".
+func TestSecurityEventPanicDuringReplacementReleasesReservation(t *testing.T) {
+	server, err := New(Config{
+		Versions: []protocol.Version{protocol.OCPP16},
+		OnDuplicateSession: func(context.Context, DuplicateSessionAttempt) (DuplicateSessionDecision, error) {
+			return ReplaceExistingSession, nil
+		},
+		Security: SecurityConfig{
+			OnEvent: func(_ context.Context, event SecurityEvent) {
+				if event.Type == SecurityEventSessionReplaced {
+					panic("boom")
+				}
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := newTestHTTPServer(t, server)
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/CP-001"
+
+	first := dialStationIdentity(t, httpServer.URL, protocol.OCPP16, "CP-001")
+	defer first.Close()
+	waitForSession(t, server, "CP-001")
+
+	// Triggers reserveIdentity's duplicate-session replacement path, where
+	// Security.OnEvent panics.
+	dialer := websocket.Dialer{Subprotocols: []string{string(protocol.OCPP16)}}
+	if second, _, secondErr := dialer.Dial(wsURL, nil); secondErr == nil {
+		second.Close()
+	}
+
+	deadline := time.Now().Add(time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		third, _, thirdErr := dialer.Dial(wsURL, nil)
+		if thirdErr == nil {
+			third.Close()
+			return
+		}
+		lastErr = thirdErr
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("identity stayed rejected after the panicking OnEvent: %v", lastErr)
+}
+
 func TestCheckOriginPanicReleasesReservation(t *testing.T) {
 	var calls atomic.Int32
 	server, err := New(Config{

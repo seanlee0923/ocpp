@@ -272,6 +272,13 @@ func cloneAttributes(attributes map[string]string) map[string]string {
 
 func (s *Server) securityEvent(ctx context.Context, event SecurityEvent) {
 	if handler := s.config.Security.OnEvent; handler != nil {
+		// A diagnostic hook must not be able to take down the protocol
+		// server (matching s.log()) — and here specifically, must not skip
+		// releasing an identity's reservation: reserveIdentity's duplicate-
+		// session-replacement path calls this while holding a reservation
+		// token, and an unrecovered panic here would leave that identity
+		// permanently rejected with "connection is already pending".
+		defer func() { _ = recover() }()
 		handler(ctx, event)
 	}
 }
