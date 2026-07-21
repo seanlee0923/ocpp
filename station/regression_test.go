@@ -1142,6 +1142,53 @@ func TestStationEscapesIdentityInDialURL(t *testing.T) {
 // never sends deliberately, but which the WebSocket protocol otherwise
 // allows — would have been dispatched exactly like a normal text-framed
 // one instead of being treated as a protocol violation.
+// TestStationEnforcesReadLimit proves Station applies Config.ReadLimit to
+// the underlying WebSocket connection, mirroring csms.Config.ReadLimit on
+// the server side. Without this, a misbehaving or malicious CSMS sending an
+// oversized message could make the Station buffer an unbounded amount of
+// memory reading it — gorilla/websocket's own default is no limit at all.
+func TestStationEnforcesReadLimit(t *testing.T) {
+	upgrader := websocket.Upgrader{Subprotocols: []string{string(protocol.OCPP16)}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		// Deliberately no conn.Close(): see TestStationRejectsBinaryFrames
+		// for why the connection is left open past this handler returning.
+		large := strings.Repeat("x", 2048)
+		encoded, err := protocol.Encode(protocol.Call{
+			ID: "1", Action: "DataTransfer", Payload: json.RawMessage(`{"vendorId":"test","data":"` + large + `"}`),
+		})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, encoded)
+	}))
+	defer server.Close()
+
+	st, err := station.New(station.Config{
+		URL: wsURL(server.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		ReadLimit: 256, // well under the 2048-byte payload the fake CSMS sends
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- st.Run(context.Background()) }()
+	t.Cleanup(st.Stop)
+
+	select {
+	case err := <-runDone:
+		if !errors.Is(err, websocket.ErrReadLimit) {
+			t.Fatalf("Run error = %v, want websocket.ErrReadLimit", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("station did not disconnect after an oversized message")
+	}
+}
+
 func TestStationRejectsBinaryFrames(t *testing.T) {
 	upgrader := websocket.Upgrader{Subprotocols: []string{string(protocol.OCPP16)}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -24,6 +24,7 @@ import (
 
 const defaultMaxConcurrentHandlers = 16
 const defaultWriteTimeout = 10 * time.Second
+const defaultReadLimit = 1 << 20 // 1MB, matching csms.Config.ReadLimit's default
 
 var (
 	ErrNotConnected               = errors.New("station: not connected")
@@ -119,7 +120,12 @@ type Config struct {
 	// Call, since a context deadline alone does nothing to bound a
 	// blocking WriteMessage call — this is the actual socket-level
 	// deadline that does.
-	WriteTimeout      time.Duration
+	WriteTimeout time.Duration
+	// ReadLimit bounds the size in bytes of a single inbound WebSocket
+	// message, matching csms.Config.ReadLimit. Default: 1MB. Without this,
+	// a malicious or misbehaving CSMS sending an oversized message could
+	// make the Station buffer an unbounded amount of memory reading it.
+	ReadLimit         int64
 	OnConnect         func(*Station)
 	OnDisconnect      func(*Station, error)
 	UniqueIDGenerator func() string // default uuid.NewString
@@ -155,6 +161,9 @@ func (config Config) validate() error {
 	}
 	if config.WriteTimeout < 0 {
 		return fmt.Errorf("station: WriteTimeout must not be negative")
+	}
+	if config.ReadLimit < 0 {
+		return fmt.Errorf("station: ReadLimit must not be negative")
 	}
 	if config.ReconnectPolicy != nil {
 		if config.ReconnectPolicy.InitialDelay < 0 || config.ReconnectPolicy.MaxDelay < 0 {
@@ -366,6 +375,7 @@ type Station struct {
 	config       Config
 	uniqueIDGen  func() string
 	writeTimeout time.Duration
+	readLimit    int64
 	handlersMu   sync.RWMutex
 	handlers     map[string]func(context.Context, json.RawMessage) (json.RawMessage, error)
 	handlerSlots chan struct{}
@@ -399,10 +409,15 @@ func New(config Config) (*Station, error) {
 	if writeTimeout == 0 {
 		writeTimeout = defaultWriteTimeout
 	}
+	readLimit := config.ReadLimit
+	if readLimit == 0 {
+		readLimit = defaultReadLimit
+	}
 	return &Station{
 		config:       config,
 		uniqueIDGen:  generator,
 		writeTimeout: writeTimeout,
+		readLimit:    readLimit,
 		handlers:     make(map[string]func(context.Context, json.RawMessage) (json.RawMessage, error)),
 		handlerSlots: make(chan struct{}, maxConcurrentHandlers),
 		pendingSlots: make(chan struct{}, maxQueuedHandlers),
@@ -591,6 +606,7 @@ func (s *Station) dial(ctx context.Context) (*stationConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	conn.SetReadLimit(s.readLimit)
 	return newStationConn(ctx, conn, s.writeTimeout), nil
 }
 

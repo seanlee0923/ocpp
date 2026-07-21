@@ -30,6 +30,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"negative MaxPendingCalls":       func(c station.Config) station.Config { c.MaxPendingCalls = -1; return c },
 		"negative MaxConcurrentHandlers": func(c station.Config) station.Config { c.MaxConcurrentHandlers = -1; return c },
 		"negative HandshakeTimeout":      func(c station.Config) station.Config { c.HandshakeTimeout = -time.Second; return c },
+		"negative ReadLimit":             func(c station.Config) station.Config { c.ReadLimit = -1; return c },
 		"negative reconnect delay": func(c station.Config) station.Config {
 			c.ReconnectPolicy = &station.ReconnectPolicy{InitialDelay: -time.Second}
 			return c
