@@ -3,7 +3,9 @@ package csms
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +21,52 @@ import (
 // OnDisconnect — instead of the panic skipping everything after OnConnect
 // and leaving the session (and its pingLoop/idleLoop/readLoop goroutines)
 // registered forever.
+// TestCheckOriginPanicReleasesReservation proves a panicking Config.CheckOrigin
+// (invoked internally by gorilla/websocket's Upgrade, after reserveIdentity
+// has already committed a reservation token for the identity) still
+// releases that reservation, instead of permanently rejecting every future
+// connection attempt for the same identity with "connection is already
+// pending".
+func TestCheckOriginPanicReleasesReservation(t *testing.T) {
+	var calls atomic.Int32
+	server, err := New(Config{
+		Versions: []protocol.Version{protocol.OCPP16},
+		CheckOrigin: func(*http.Request) bool {
+			if calls.Add(1) == 1 {
+				panic("boom")
+			}
+			return true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := newTestHTTPServer(t, server)
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/CP-001"
+	dialer := websocket.Dialer{Subprotocols: []string{string(protocol.OCPP16)}}
+
+	if first, _, firstErr := dialer.Dial(wsURL, nil); firstErr == nil {
+		first.Close()
+		t.Fatal("first dial succeeded even though CheckOrigin was set to panic")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		second, response, dialErr := dialer.Dial(wsURL, nil)
+		if dialErr == nil {
+			second.Close()
+			return
+		}
+		if response != nil && response.StatusCode == http.StatusConflict {
+			t.Fatalf("identity still rejected with 409 after the panicking CheckOrigin: %v", dialErr)
+		}
+		lastErr = dialErr
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("second dial never succeeded: %v", lastErr)
+}
+
 func TestOnConnectPanicDoesNotLeakSession(t *testing.T) {
 	disconnected := make(chan struct{}, 1)
 	server, err := New(Config{

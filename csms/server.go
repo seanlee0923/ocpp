@@ -260,14 +260,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Guarantees the reservation is released on every exit from here on,
+	// including a panic — s.upgrader.Upgrade below calls the user-supplied
+	// Config.CheckOrigin internally, with no recover anywhere in that call
+	// path, so a panicking CheckOrigin would otherwise skip every
+	// releaseReservation call below it and permanently reject this
+	// identity with "connection is already pending". Safe to defer
+	// unconditionally: releaseReservation is a no-op once
+	// activateReservation has already zeroed out this same token below.
+	defer s.releaseReservation(identity, reservation)
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		s.releaseReservation(identity, reservation)
 		return
 	}
 	version, err = protocol.ParseVersion(conn.Subprotocol())
 	if err != nil {
-		s.releaseReservation(identity, reservation)
 		_ = conn.Close()
 		return
 	}
