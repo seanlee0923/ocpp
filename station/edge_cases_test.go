@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/seanlee0923/ocpp/csms"
 	"github.com/seanlee0923/ocpp/protocol"
 	"github.com/seanlee0923/ocpp/station"
@@ -68,6 +70,40 @@ func TestStationCallHonorsContextTimeout(t *testing.T) {
 	_, err := station.Call[v16.HeartbeatRequest, v16.HeartbeatConfirmation](ctx, st, v16.HeartbeatRequest{})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("error = %v, want context deadline exceeded", err)
+	}
+}
+
+// TestStationCallWithCanceledContextDoesNotWriteFrame is the station-side
+// mirror of csms.TestCallWithCanceledContextDoesNotWriteFrame: cancellation
+// must win before the CSMS can observe or execute the outbound CALL.
+func TestStationCallWithCanceledContextDoesNotWriteFrame(t *testing.T) {
+	received := make(chan []byte, 1)
+	upgrader := websocket.Upgrader{Subprotocols: []string{string(protocol.OCPP16)}}
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, data, err := conn.ReadMessage()
+		if err == nil {
+			received <- data
+		}
+	}))
+	t.Cleanup(httpServer.Close)
+
+	st := dialStation(t, httpServer.URL, "CP-001", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := station.Call[v16.HeartbeatRequest, v16.HeartbeatConfirmation](ctx, st, v16.HeartbeatRequest{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Call error = %v, want context.Canceled", err)
+	}
+
+	select {
+	case data := <-received:
+		t.Fatalf("CSMS received frame %s after Call context was already canceled", data)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

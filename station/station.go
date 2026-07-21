@@ -370,12 +370,18 @@ func (c *stationConn) resolve(message protocol.Message) {
 // reading) can't block ctx's caller indefinitely regardless of what
 // deadline ctx carries.
 func (c *stationConn) send(ctx context.Context, message protocol.Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := protocol.Encode(message)
 	if err != nil {
 		return err
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	select {
 	case <-c.closed:
 		return ErrNotConnected

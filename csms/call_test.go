@@ -124,6 +124,42 @@ func TestCallHonorsContextTimeout(t *testing.T) {
 	}
 }
 
+// TestCallWithCanceledContextDoesNotWriteFrame proves an already-canceled
+// context stops a CALL before any wire side effect. Returning
+// context.Canceled after transmitting the frame would let the remote station
+// execute a non-idempotent action while the caller believes it never started.
+func TestCallWithCanceledContextDoesNotWriteFrame(t *testing.T) {
+	connected := make(chan *Session, 1)
+	server, err := New(Config{
+		Versions:  []protocol.Version{protocol.OCPP16},
+		OnConnect: func(session *Session) { connected <- session },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	conn := dialTestStation(t, httpServer.URL, protocol.OCPP16)
+	defer conn.Close()
+	session := <-connected
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = Call[v16.ResetRequest, v16.ResetConfirmation](
+		ctx, session, v16.ResetRequest{Type: v16.ResetRequestTypeSoft},
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Call error = %v, want context.Canceled", err)
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if _, data, err := conn.ReadMessage(); err == nil {
+		t.Fatalf("peer received frame %s after Call context was already canceled", data)
+	}
+}
+
 func TestCallConvertsUniqueIDGeneratorPanicToError(t *testing.T) {
 	connected := make(chan *Session, 1)
 	server, err := New(Config{

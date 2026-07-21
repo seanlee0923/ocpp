@@ -180,12 +180,18 @@ func (s *Session) resolve(message protocol.Message) bool {
 // send is the only raw frame write path. Public callers use Call or typed
 // profile methods so outbound CALLs are always registered and correlated.
 func (s *Session) send(ctx context.Context, message protocol.Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := protocol.Encode(message)
 	if err != nil {
 		return err
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	select {
 	case <-s.closed:
 		return ErrSessionClosed
