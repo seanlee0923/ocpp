@@ -9,6 +9,8 @@ the same major version.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-23
+
 ### Added
 
 - Opt-in `csms.Metrics`/`csms.MetricsFunc` hook — observes session connect/
@@ -105,6 +107,10 @@ the same major version.
 
 ### Fixed
 
+- Fixed the Station connection ordering so a synchronous `station.Call` from
+  `Config.OnConnect` can receive its response after the read loop starts.
+- Updated Metrics GoDoc and production documentation that still described the
+  fixed worker pool as one goroutine per event.
 - Moved `LogSessionConnected`/`MetricSessionConnected` recording earlier,
   before the read loop starts and before `Config.OnConnect` runs. Previously,
   a Charging Station writing a frame immediately after the upgrade, or an
@@ -162,6 +168,9 @@ the same major version.
 
 ### Changed
 
+- Moved the Prometheus and OpenTelemetry examples into a separate `examples`
+  Go module so core consumers do not inherit example-only dependencies. CI
+  builds and tests both modules.
 - Consolidated CALLERROR code derivation, previously scattered per OCPP
   version, into shared helpers (no behavior change, easier to maintain).
 - Changed `Metrics.Record` dispatch from spawning a goroutine per event to a
@@ -231,5 +240,6 @@ layer.
   helper (`callBooted`). Public method names, signatures, and behavior are
   unchanged.
 
-[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/seanlee0923/ocpp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/seanlee0923/ocpp/releases/tag/v0.1.0

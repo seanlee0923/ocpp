@@ -9,6 +9,8 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-23
+
 ### Added
 
 - opt-in `csms.Metrics`/`csms.MetricsFunc` hook — 세션 연결/해제, inbound
@@ -92,6 +94,10 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
 
 ### Fixed
 
+- `station.Config.OnConnect`에서 동기 `station.Call`을 실행하면 read loop가 아직
+  시작되지 않아 응답을 처리하지 못하고 timeout되던 연결 순서 결함을 수정했다.
+- 고정 worker pool인 `Metrics.Record` dispatch를 이벤트별 goroutine으로 잘못
+  설명하던 GoDoc과 운영 문서를 실제 구현에 맞췄다.
 - 세션 연결 시 `LogSessionConnected`/`MetricSessionConnected` 기록 시점을 read
   loop 시작과 `Config.OnConnect` 호출보다 앞으로 옮겼다. 이전에는 충전기가 업그레이드
   직후 바로 CALL을 보내거나 `OnConnect`에서 blocking `csms.Call`을 사용하면(둘 다
@@ -142,6 +148,9 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
 
 ### Changed
 
+- Prometheus와 OpenTelemetry를 사용하는 예제를 별도 `examples` Go module로
+  분리해 core 사용자가 예제 전용 의존성을 받지 않도록 했다. CI는 두 module을
+  각각 build/test한다.
 - CALLERROR 코드 산출 로직을 OCPP 버전별로 흩어져 있던 것에서 공유 헬퍼로
   통합했다(동작 변경 없음, 유지보수성 개선).
 - `Metrics.Record` dispatch 방식을 이벤트마다 별도 goroutine을 spawn하던 것에서
@@ -199,5 +208,6 @@ OCPP 2.1(Edition 2)을 하나의 전송 계층에서 지원합니다.
   공통 제네릭 헬퍼(`callBooted`)로 정리. 공개 메서드 이름·시그니처와 동작은
   변경되지 않았다.
 
-[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/seanlee0923/ocpp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/seanlee0923/ocpp/releases/tag/v0.1.0
