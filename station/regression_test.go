@@ -108,6 +108,55 @@ func TestStationOnConnectPanicDoesNotCrashStation(t *testing.T) {
 	}
 }
 
+// TestStationOnConnectCanPerformBlockingCall proves the connection read loop
+// starts before OnConnect. BootNotification is normally the first operation a
+// station performs after connecting, and a synchronous Call from the hook
+// would otherwise wait forever because no goroutine could read its result.
+func TestStationOnConnectCanPerformBlockingCall(t *testing.T) {
+	router := csms.NewRouter()
+	if err := csms.Handle(router, func(
+		_ context.Context, _ *csms.Session, _ v16.BootNotificationRequest,
+	) (v16.BootNotificationConfirmation, error) {
+		return v16.BootNotificationConfirmation{
+			Status: v16.BootNotificationConfirmationStatusAccepted, CurrentTime: "2026-07-23T00:00:00Z", Interval: 300,
+		}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server, err := csms.New(csms.Config{Router: router, Versions: []protocol.Version{protocol.OCPP16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	callResult := make(chan error, 1)
+	st, err := station.New(station.Config{
+		URL: wsURL(httpServer.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		CallTimeout: time.Second,
+		OnConnect: func(st *station.Station) {
+			_, err := station.Call[v16.BootNotificationRequest, v16.BootNotificationConfirmation](
+				context.Background(), st,
+				v16.BootNotificationRequest{ChargePointVendor: "Acme", ChargePointModel: "X1"},
+			)
+			callResult <- err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+
+	select {
+	case err := <-callResult:
+		if err != nil {
+			t.Fatalf("blocking Call from OnConnect failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocking Call from OnConnect did not complete")
+	}
+}
+
 // TestStationHandlerErrorDoesNotLeakDetails proves a plain (non-*CallError)
 // handler error never reaches the CSMS as-is: only a fixed "internal
 // error" description crosses the wire, matching how csms's handleCall

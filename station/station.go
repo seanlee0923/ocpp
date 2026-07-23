@@ -551,9 +551,14 @@ func (s *Station) Run(ctx context.Context) error {
 			attempt = 0
 			s.setConn(conn)
 			s.setState(Connected)
+			// Start the read loop before OnConnect. A connection hook commonly
+			// sends BootNotification synchronously; its CALLRESULT can only be
+			// resolved while the read loop is running.
+			connectionResult := make(chan error, 1)
+			go func() { connectionResult <- s.runConnection(ctx, conn) }()
 			s.callOnConnect()
 
-			attemptErr = s.runConnection(ctx, conn)
+			attemptErr = <-connectionResult
 			conn.close(attemptErr)
 			graceCtx, graceCancel := context.WithTimeout(context.Background(), disconnectHandlerGrace)
 			_ = conn.waitHandlers(graceCtx)
