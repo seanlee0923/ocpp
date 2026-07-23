@@ -53,13 +53,13 @@ an error code — never a payload. Panics are isolated the same way as
 `Logger`. Outbound `csms.Call` distinguishes the send itself
 (`MetricOutboundCallSent`) from its final outcome — completed, failed, timed
 out, canceled, or rejected because `MaxPendingCalls` was reached.
-`Metrics.Record` is dispatched on its own goroutine per event, so it never
-blocks the caller — a slow or hung implementation cannot delay handler
-processing or an outbound `csms.Call`'s cancellation responsiveness. In
-exchange, `Record` must be safe for concurrent use and carries no ordering
-guarantee; if concurrent dispatches exceed a fixed internal bound, further
-events are dropped rather than queued (a healthy implementation never
-reaches that bound). `Record` always receives `context.Background()`: the
+`Metrics.Record` is dispatched by a fixed worker pool per `Server` consuming
+a shared bounded queue, so it never blocks the caller. A slow or hung
+implementation cannot delay handler processing or an outbound `csms.Call`'s
+cancellation responsiveness, but a call that never returns permanently
+occupies one worker. `Record` must be safe for concurrent use, event ordering
+is not guaranteed, and further events are dropped when the queue is full.
+`Record` always receives `context.Background()`: the
 events that report a timeout, cancellation, or shutdown are produced exactly
 when the original context may already be canceled, so propagating it would
 let a Metrics implementation that defensively no-ops when `ctx.Err() != nil`

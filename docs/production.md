@@ -44,11 +44,12 @@ certificate, idToken과 handler error text가 포함되지 않는다. logger cal
 각 단계를 관측한다. identity, OCPP version, message type, Action, 소요 시간, error code만
 전달하며 payload는 포함하지 않는다. panic은 `Logger`와 동일하게 격리된다. outbound
 `csms.Call`은 전송(`MetricOutboundCallSent`)과 최종 결과(완료/실패/timeout/취소/
-`MaxPendingCalls` 초과 거부)를 구분해서 관측할 수 있다. `Metrics.Record`는 이벤트마다
-별도 goroutine에서 dispatch되어 호출자를 블로킹하지 않는다 — 느리거나 멈춘 구현체가
-handler 처리나 outbound `csms.Call`의 취소 응답성을 지연시키지 않는다. 대신 `Record`는
-동시 호출에 안전해야 하고 이벤트 도착 순서를 보장하지 않으며, 동시 dispatch 수가 내부
-고정 상한을 넘으면 초과분은 버려진다(정상 구현체는 이 상한에 도달하지 않는다).
+`MaxPendingCalls` 초과 거부)를 구분해서 관측할 수 있다. `Metrics.Record`는 `Server`당
+고정된 worker pool이 공유 큐를 소비하는 방식으로 dispatch되어 호출자를 블로킹하지 않는다.
+느리거나 멈춘 구현체가 handler 처리나 outbound `csms.Call`의 취소 응답성을 지연시키지는
+않지만, 영원히 반환하지 않는 호출은 worker 하나를 계속 점유한다. `Record`는 동시 호출에
+안전해야 하고 이벤트 도착 순서를 보장하지 않으며, bounded queue가 가득 차면 초과분은
+버려진다.
 `Record`에는 항상 `context.Background()`가 전달된다 — timeout/cancel/shutdown을
 보고하는 이벤트가 정확히 그 시점엔 원래 context가 이미 취소돼 있을 수 있어서, 원래
 context를 그대로 넘기면 `ctx.Err() != nil`일 때 아무 것도 안 하는 방어적 `Record`

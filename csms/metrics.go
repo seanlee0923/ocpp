@@ -105,15 +105,14 @@ type MetricEvent struct {
 // lifecycle events. Implementations are expected to aggregate events (for
 // example into counters and histograms) rather than perform I/O per event.
 //
-// Record must be safe for concurrent use: it is dispatched from its own
-// goroutine for every event, across every session, so it may run
-// concurrently with itself and carries no ordering guarantee relative to
-// when events logically occurred. A slow or blocking Record implementation
-// never delays the protocol server — recordMetric never waits for Record to
-// return — but if Record is persistently slower than events are produced,
-// the bounded number of concurrent dispatches (maxConcurrentMetricDispatch)
-// is exhausted and further events are silently dropped rather than queued
-// or blocked.
+// Record must be safe for concurrent use: a fixed worker pool shared by all
+// sessions on a Server dispatches events, so Record may run concurrently with
+// itself and carries no ordering guarantee relative to when events logically
+// occurred. A slow or blocking Record implementation never delays the
+// protocol server — recordMetric only attempts a non-blocking enqueue — but
+// permanently blocking calls reduce the worker pool's effective capacity. If
+// producers remain faster than the available workers and the bounded queue
+// fills, further events are silently dropped rather than blocking.
 //
 // The context passed to Record is always context.Background(), never a
 // request- or session-scoped context: every MetricEvent can be produced at a
