@@ -245,7 +245,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported OCPP WebSocket subprotocol", http.StatusBadRequest)
 		return
 	}
-	attempt := HandshakeAttempt{Identity: identity, Version: version, RemoteAddr: r.RemoteAddr}
+	attempt := HandshakeAttempt{Identity: identity, Version: version, RemoteAddr: r.RemoteAddr, Header: r.Header}
 	if limiter := s.config.Security.HandshakeLimiter; limiter != nil && !limiter.Allow(r.Context(), attempt) {
 		s.securityEvent(r.Context(), SecurityEvent{
 			Type: SecurityEventHandshakeRateLimited, Identity: identity,

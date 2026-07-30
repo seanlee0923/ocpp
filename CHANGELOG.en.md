@@ -9,6 +9,18 @@ the same major version.
 
 ## [Unreleased]
 
+### Added
+
+- Added a `Header http.Header` field to `AuthenticationRequest` and
+  `HandshakeAttempt`, exposing the WebSocket upgrade request's headers as-is.
+  Behind a reverse proxy or Ingress controller, `RemoteAddr` is always the
+  proxy's own address, so resolving the real client address from
+  `X-Forwarded-For` or similar — under whatever trusted-proxy policy fits the
+  deployment — required access to the headers (#1). The library still does
+  not interpret `X-Forwarded-For` or any similar header itself: deciding
+  which proxies to trust is left to the `Authenticator`/`HandshakeLimiter`
+  implementation.
+
 ## [0.2.0] - 2026-07-23
 
 ### Added

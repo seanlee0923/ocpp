@@ -225,6 +225,41 @@ func TestIPRateLimiter(t *testing.T) {
 	}
 }
 
+func TestHandshakeAttemptAndAuthenticationRequestExposeHeader(t *testing.T) {
+	var handshakeHeader, authHeader http.Header
+	server, err := New(Config{
+		Versions: []protocol.Version{protocol.OCPP16},
+		Security: SecurityConfig{
+			Profile: SecurityProfileBasicAuth,
+			HandshakeLimiter: HandshakeLimiterFunc(func(_ context.Context, attempt HandshakeAttempt) bool {
+				handshakeHeader = attempt.Header
+				return true
+			}),
+			Authenticator: AuthenticatorFunc(func(_ context.Context, request AuthenticationRequest) (Principal, error) {
+				authHeader = request.Header
+				return Principal{ID: request.Identity}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	header := basicHeader("CP-001", "secret")
+	header.Set("X-Forwarded-For", "203.0.113.7")
+	conn := dialStationWithHeader(t, httpServer.URL, protocol.OCPP16, header)
+	defer conn.Close()
+
+	if handshakeHeader == nil || handshakeHeader.Get("X-Forwarded-For") != "203.0.113.7" {
+		t.Fatalf("HandshakeAttempt.Header = %#v, want X-Forwarded-For = 203.0.113.7", handshakeHeader)
+	}
+	if authHeader == nil || authHeader.Get("X-Forwarded-For") != "203.0.113.7" {
+		t.Fatalf("AuthenticationRequest.Header = %#v, want X-Forwarded-For = 203.0.113.7", authHeader)
+	}
+}
+
 func basicHeader(username, password string) http.Header {
 	header := make(http.Header)
 	token := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))

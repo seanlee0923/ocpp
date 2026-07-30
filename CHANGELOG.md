@@ -9,6 +9,16 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
 
 ## [Unreleased]
 
+### Added
+
+- `AuthenticationRequest`/`HandshakeAttempt`에 `Header http.Header` 필드
+  추가 — WebSocket upgrade 요청의 header를 그대로 노출한다. 리버스 프록시나
+  Ingress controller 뒤에 배포된 경우 `RemoteAddr`는 항상 프록시 자신의
+  주소이므로, 신뢰하는 프록시 정책에 따라 `X-Forwarded-For` 등에서 실제
+  클라이언트 주소를 판별하려면 header 접근이 필요했다(#1). 라이브러리는 어떤
+  프록시를 신뢰할지 결정할 수 없으므로 `X-Forwarded-For` 등을 직접 해석하지는
+  않는다 — 그 판단은 `Authenticator`/`HandshakeLimiter` 구현체에 맡긴다.
+
 ## [0.2.0] - 2026-07-23
 
 ### Added

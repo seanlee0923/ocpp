@@ -38,8 +38,16 @@ type AuthenticationRequest struct {
 	Identity   string
 	Version    protocol.Version
 	RemoteAddr string
-	TLS        *tls.ConnectionState
-	Basic      *BasicCredentials
+	// Header is the WebSocket upgrade request's header, exposed so an
+	// Authenticator can resolve the real client address behind a reverse
+	// proxy or Ingress controller — where RemoteAddr is always the proxy's
+	// own address — using whatever trusted-proxy policy fits the
+	// deployment. The library does not interpret X-Forwarded-For or any
+	// similar header itself: which proxies to trust is a deployment-specific
+	// decision it cannot make on a consuming application's behalf.
+	Header http.Header
+	TLS    *tls.ConnectionState
+	Basic  *BasicCredentials
 }
 
 type Principal struct {
@@ -63,6 +71,10 @@ type HandshakeAttempt struct {
 	Identity   string
 	Version    protocol.Version
 	RemoteAddr string
+	// Header is the WebSocket upgrade request's header — see
+	// AuthenticationRequest.Header's doc comment for why it's exposed and
+	// what the library deliberately does not do with it.
+	Header http.Header
 }
 
 type HandshakeLimiter interface {
@@ -241,7 +253,7 @@ func (s *Server) authenticate(r *http.Request, identity string, version protocol
 		return Principal{ID: identity}, 0, nil
 	}
 	principal, err := security.Authenticator.Authenticate(r.Context(), AuthenticationRequest{
-		Identity: identity, Version: version, RemoteAddr: r.RemoteAddr, TLS: r.TLS, Basic: basic,
+		Identity: identity, Version: version, RemoteAddr: r.RemoteAddr, Header: r.Header, TLS: r.TLS, Basic: basic,
 	})
 	if err != nil {
 		if errors.Is(err, ErrAuthenticationUnavailable) {
