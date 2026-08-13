@@ -9,21 +9,7 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
 
 ## [Unreleased]
 
-### Fixed
-
-- `csms.Call`/`station.Call`이 ctx deadline 만료로 실패한 write를 raw net
-  error(`writev tcp ...: i/o timeout`)로 반환하던 문제 수정. ctx의 deadline이
-  `WriteTimeout`보다 이르면 그 deadline이 그대로 socket write deadline이 되므로,
-  write 도중 만료는 사실상 호출자의 deadline 만료인데도
-  `errors.Is(err, context.DeadlineExceeded)`가 false였다. outbound call metric은
-  이미 `classifyContextOutcome(callCtx.Err())`로 판단해 `MetricOutboundCallTimeout`을
-  내보내고 있어 같은 사건을 에러와 metric이 서로 다르게 보고했다. 이제 write 실패 시
-  ctx가 종료된 상태면 ctx의 error로 감싸 반환하며 transport 상세는 메시지에 남긴다.
-  단순히 `ctx.Err()`만 보는 것으로는 부족한데, socket deadline과 ctx timer가 같은
-  시각에 예약되어 socket이 수 마이크로초 차이로 먼저 발화하는 경우 `ctx.Err()`가 아직
-  nil이기 때문이다 — 그래서 적용된 deadline의 출처를 함께 추적한다. 이 불일치는
-  실제로 CI를 간헐적으로 깨뜨리고 있었다(`TestOutboundCallTimeoutEmitsMetric`이
-  coverage job의 부하 조건에서 실패).
+## [0.3.0] - 2026-08-13
 
 ### Added
 
@@ -41,6 +27,22 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   Heartbeat이 아니므로 CSMS의 OCPP 레벨 idle timeout(`csms.Config.IdleTimeout`
   포함 — pong을 활동으로 세지 않는다)을 만족시키지 못한다는 점을 README와
   sessions 문서 한/영에 명시했다.
+
+### Fixed
+
+- `csms.Call`/`station.Call`이 ctx deadline 만료로 실패한 write를 raw net
+  error(`writev tcp ...: i/o timeout`)로 반환하던 문제 수정. ctx의 deadline이
+  `WriteTimeout`보다 이르면 그 deadline이 그대로 socket write deadline이 되므로,
+  write 도중 만료는 사실상 호출자의 deadline 만료인데도
+  `errors.Is(err, context.DeadlineExceeded)`가 false였다. outbound call metric은
+  이미 `classifyContextOutcome(callCtx.Err())`로 판단해 `MetricOutboundCallTimeout`을
+  내보내고 있어 같은 사건을 에러와 metric이 서로 다르게 보고했다. 이제 write 실패 시
+  ctx가 종료된 상태면 ctx의 error로 감싸 반환하며 transport 상세는 메시지에 남긴다.
+  단순히 `ctx.Err()`만 보는 것으로는 부족한데, socket deadline과 ctx timer가 같은
+  시각에 예약되어 socket이 수 마이크로초 차이로 먼저 발화하는 경우 `ctx.Err()`가 아직
+  nil이기 때문이다 — 그래서 적용된 deadline의 출처를 함께 추적한다. 이 불일치는
+  실제로 CI를 간헐적으로 깨뜨리고 있었다(`TestOutboundCallTimeoutEmitsMetric`이
+  coverage job의 부하 조건에서 실패).
 
 ## [0.2.1] - 2026-07-30
 
@@ -253,7 +255,8 @@ OCPP 2.1(Edition 2)을 하나의 전송 계층에서 지원합니다.
   공통 제네릭 헬퍼(`callBooted`)로 정리. 공개 메서드 이름·시그니처와 동작은
   변경되지 않았다.
 
-[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/seanlee0923/ocpp/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/seanlee0923/ocpp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/seanlee0923/ocpp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/seanlee0923/ocpp/releases/tag/v0.1.0
