@@ -341,7 +341,13 @@ func newStationConn(parent context.Context, conn *websocket.Conn, writeTimeout, 
 		pending: make(map[string]chan callOutcome), closed: make(chan struct{}),
 	}
 	if pongTimeout > 0 {
-		c.touchReadDeadline()
+		// Ignored deliberately, matching how csms.Server arms its own first
+		// read deadline: the only way this fails is an underlying
+		// connection that is already broken, in which case readLoop's very
+		// first ReadMessage fails with the same cause and Run handles it as
+		// an ordinary connection failure. There is no separate recovery to
+		// do here, and newStationConn has no error to return.
+		_ = c.touchReadDeadline()
 		conn.SetPongHandler(func(string) error { return c.touchReadDeadline() })
 		// Overriding the ping handler replaces gorilla's default one, which
 		// is what actually answers the CSMS's pings — so this has to send
