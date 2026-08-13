@@ -657,7 +657,31 @@ confirmation, err := station.Call[v16.BootNotificationRequest, v16.BootNotificat
 
 `station.Handle`로 등록한 핸들러는 재연결 이후에도 유지됩니다. 재연결 중 끊긴 연결의
 pending Call은 즉시 실패 처리되며(오프라인 큐잉 없음), Basic Auth/TLS(mTLS 포함)는
-`Config.BasicAuth`/`Config.TLSConfig`로 설정합니다. 여러 charger를 동시에 운영하려면
+`Config.BasicAuth`/`Config.TLSConfig`로 설정합니다.
+
+### 연결 유지 (keepalive)
+
+`Config.PingInterval`은 station이 직접 WebSocket ping을 보내게 하고,
+`Config.PongTimeout`은 CSMS가 그 시간 동안 아무것도 보내지 않으면 연결을
+`station.ErrPongTimeout`으로 끊어 `ReconnectPolicy`에 태웁니다. 둘 다 기본값 0(비활성)이며,
+함께 설정할 때는 `PongTimeout > PingInterval`이어야 합니다.
+
+```go
+st, err := station.New(station.Config{
+    URL: "wss://csms.example.com", Identity: "STATION-01", Version: protocol.OCPP16,
+    PingInterval: 30 * time.Second, // station이 먼저 ping을 보냄
+    PongTimeout:  90 * time.Second, // 이 시간 동안 CSMS가 조용하면 끊고 재연결
+})
+```
+
+`PongTimeout`은 pong뿐 아니라 **모든 inbound frame**(OCPP 메시지, CSMS의 ping, pong)으로
+갱신되므로 "CSMS가 조용해졌다"를 측정합니다. 따라서 CSMS가 먼저 ping을 보내주는 환경에서는
+`PongTimeout`만 켜도 half-open 감지가 동작합니다.
+
+> **WebSocket ping은 OCPP Heartbeat이 아닙니다.** CSMS가 OCPP 레벨 idle timeout을
+> 적용한다면(이 라이브러리의 `csms.Config.IdleTimeout`도 그중 하나로, pong을 활동으로 세지
+> **않습니다**) ping/pong으로는 만족되지 않습니다. BootNotification 응답의 `Interval`
+> 주기로 실제 Heartbeat을 `station.Call`로 보내야 하며, 이는 애플리케이션 책임입니다. 여러 charger를 동시에 운영하려면
 호출자가 직접 `map[string]*station.Station`을 관리합니다 — 이 라이브러리는 프로토콜/세션
 동작만 책임집니다. [`examples/station-client`](examples/station-client) 참고.
 

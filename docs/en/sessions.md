@@ -41,7 +41,16 @@ registry, even after the underlying connection has actually closed.
 `OnConnect`, `OnDisconnect`, and `OnDuplicateSession` must all return
 promptly; hand off anything slow to its own goroutine.
 
-`PingInterval`, `PongTimeout`, and `IdleTimeout` manage connection health.
+`PingInterval`, `PongTimeout`, and `IdleTimeout` manage connection health, but
+they measure different things. `PingInterval` is how often the server sends a
+WebSocket ping, `PongTimeout` is the read deadline waiting for the matching
+pong, and `IdleTimeout` measures silence in **OCPP messages**. `IdleTimeout`
+therefore does not count pongs as activity: a charging station whose ping/pong
+is perfectly healthy but that sends no OCPP message (no Heartbeat, no
+StatusNotification) is still closed with `ErrIdleTimeout`. That is deliberate —
+it is how a connection that is alive at the WebSocket layer but dead at the
+OCPP layer gets cleaned up. The client-side counterparts are
+`station.Config.PingInterval`/`PongTimeout`.
 `Session.Done()` closes on termination and `Session.Err()` holds the cause.
 `Session.Context()` can be used as the cancellation basis for handlers and
 background work.

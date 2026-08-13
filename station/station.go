@@ -45,6 +45,7 @@ var (
 	ErrTooManyPendingCalls        = errors.New("station: too many pending calls")
 	ErrDuplicateUniqueID          = errors.New("station: duplicate unique ID")
 	ErrUniqueIDGeneration         = errors.New("station: unique ID generation failed")
+	ErrPongTimeout                = errors.New("station: WebSocket pong timeout")
 	ErrHandlerAlreadyRegistered   = errors.New("station: handler already registered for this action")
 	ErrInvalidHandlerRegistration = errors.New("station: invalid handler registration")
 )
@@ -138,7 +139,38 @@ type Config struct {
 	// message, matching csms.Config.ReadLimit. Default: 1MB. Without this,
 	// a malicious or misbehaving CSMS sending an oversized message could
 	// make the Station buffer an unbounded amount of memory reading it.
-	ReadLimit         int64
+	ReadLimit int64
+	// PingInterval makes the Station originate a WebSocket ping every
+	// interval. Zero (the default) disables it, since a CSMS is normally
+	// the side that pings — but a CSMS that does not ping, yet drops
+	// connections it considers silent, needs the Station to keep the
+	// connection warm itself. Unlike csms.Config.PingInterval, which
+	// defaults to 30s, zero here means off so that enabling keepalive is
+	// always the caller's explicit choice.
+	//
+	// Note this is a WebSocket-level ping, not an OCPP Heartbeat. A CSMS
+	// enforcing an OCPP-level idle timeout (csms.Config.IdleTimeout is one
+	// such implementation, and it deliberately does not count pongs as
+	// activity) is only satisfied by an actual Heartbeat message, which is
+	// application-owned: send it with station.Call on the interval the
+	// BootNotification confirmation returned.
+	PingInterval time.Duration
+	// PongTimeout bounds how long the CSMS may stay completely silent
+	// before the connection is treated as dead and closed with
+	// ErrPongTimeout, which feeds ReconnectPolicy like any other
+	// connection failure. Zero (the default) disables it, leaving reads
+	// unbounded — a half-open peer then goes undetected until the OS TCP
+	// stack notices, which can take many minutes.
+	//
+	// Any inbound frame resets it: a pong, an OCPP message, or a ping from
+	// the CSMS. It therefore measures "the CSMS has gone quiet", not
+	// "a pong specifically went missing", so it is usable on its own
+	// against a CSMS that pings its clients or sends regular traffic.
+	// Pairing it with PingInterval is what makes it reliable against a
+	// CSMS that would otherwise send nothing for long stretches; when both
+	// are set, PongTimeout must be greater than PingInterval so at least
+	// one ping can be answered before the deadline expires.
+	PongTimeout       time.Duration
 	OnConnect         func(*Station)
 	OnDisconnect      func(*Station, error)
 	UniqueIDGenerator func() string // default uuid.NewString
@@ -177,6 +209,19 @@ func (config Config) validate() error {
 	}
 	if config.ReadLimit < 0 {
 		return fmt.Errorf("station: ReadLimit must not be negative")
+	}
+	if config.PingInterval < 0 {
+		return fmt.Errorf("station: PingInterval must not be negative")
+	}
+	if config.PongTimeout < 0 {
+		return fmt.Errorf("station: PongTimeout must not be negative")
+	}
+	// Mirrors csms.New's equivalent check: with a PongTimeout at or below
+	// PingInterval, the deadline expires before the first ping it is
+	// supposed to be waiting on could ever be answered, so the connection
+	// would be torn down on a perfectly healthy CSMS.
+	if config.PingInterval > 0 && config.PongTimeout > 0 && config.PongTimeout <= config.PingInterval {
+		return fmt.Errorf("station: PongTimeout must be greater than PingInterval")
 	}
 	if config.ReconnectPolicy != nil {
 		if config.ReconnectPolicy.InitialDelay < 0 || config.ReconnectPolicy.MaxDelay < 0 {
@@ -275,6 +320,7 @@ type stationConn struct {
 	cancel       context.CancelFunc
 	writeMu      sync.Mutex
 	writeTimeout time.Duration
+	pongTimeout  time.Duration
 	pendingMu    sync.Mutex
 	pending      map[string]chan callOutcome
 	closed       chan struct{}
@@ -287,9 +333,78 @@ type stationConn struct {
 // caller attached to Run's ctx, and observe the caller canceling Run
 // directly rather than only through runConnection's watcher goroutine
 // forcing the socket closed.
-func newStationConn(parent context.Context, conn *websocket.Conn, writeTimeout time.Duration) *stationConn {
+func newStationConn(parent context.Context, conn *websocket.Conn, writeTimeout, pongTimeout time.Duration) *stationConn {
 	ctx, cancel := context.WithCancel(parent)
-	return &stationConn{conn: conn, ctx: ctx, cancel: cancel, writeTimeout: writeTimeout, pending: make(map[string]chan callOutcome), closed: make(chan struct{})}
+	c := &stationConn{
+		conn: conn, ctx: ctx, cancel: cancel,
+		writeTimeout: writeTimeout, pongTimeout: pongTimeout,
+		pending: make(map[string]chan callOutcome), closed: make(chan struct{}),
+	}
+	if pongTimeout > 0 {
+		c.touchReadDeadline()
+		conn.SetPongHandler(func(string) error { return c.touchReadDeadline() })
+		// Overriding the ping handler replaces gorilla's default one, which
+		// is what actually answers the CSMS's pings — so this has to send
+		// the pong itself, or the CSMS would see the Station stop replying
+		// the moment PongTimeout is enabled. Matching gorilla's default, a
+		// closed connection or a temporary write failure is not treated as
+		// fatal to the read loop.
+		conn.SetPingHandler(func(data string) error {
+			_ = c.touchReadDeadline()
+			deadline := time.Now().Add(writeTimeout)
+			if writeTimeout <= 0 {
+				deadline = time.Now().Add(defaultWriteTimeout)
+			}
+			err := conn.WriteControl(websocket.PongMessage, []byte(data), deadline)
+			if errors.Is(err, websocket.ErrCloseSent) {
+				return nil
+			}
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				return nil
+			}
+			return err
+		})
+	}
+	return c
+}
+
+// touchReadDeadline pushes the read deadline out by a full pongTimeout,
+// marking the CSMS as alive. Only ever called from the read goroutine —
+// from readLoop itself, or from the ping/pong handlers gorilla invokes
+// inside a read call — so it needs no synchronization with the writer.
+func (c *stationConn) touchReadDeadline() error {
+	if c.pongTimeout <= 0 {
+		return nil
+	}
+	return c.conn.SetReadDeadline(time.Now().Add(c.pongTimeout))
+}
+
+// pingLoop originates a WebSocket ping every interval until the connection
+// closes, mirroring csms.Session.pingLoop. A failed ping means the
+// connection is gone, so it closes the connection, which unblocks readLoop
+// and lets Run's reconnect logic take over.
+func (c *stationConn) pingLoop(interval time.Duration) {
+	if interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			deadline := time.Now().Add(c.writeTimeout)
+			if c.writeTimeout <= 0 {
+				deadline = time.Now().Add(defaultWriteTimeout)
+			}
+			if err := c.conn.WriteControl(websocket.PingMessage, nil, deadline); err != nil {
+				c.close(err)
+				return
+			}
+		case <-c.closed:
+			return
+		}
+	}
 }
 
 func (c *stationConn) close(cause error) {
@@ -425,6 +540,8 @@ type Station struct {
 	config       Config
 	uniqueIDGen  func() string
 	writeTimeout time.Duration
+	pingInterval time.Duration
+	pongTimeout  time.Duration
 	readLimit    int64
 	handlersMu   sync.RWMutex
 	handlers     map[string]func(context.Context, json.RawMessage) (json.RawMessage, error)
@@ -467,6 +584,8 @@ func New(config Config) (*Station, error) {
 		config:       config,
 		uniqueIDGen:  generator,
 		writeTimeout: writeTimeout,
+		pingInterval: config.PingInterval,
+		pongTimeout:  config.PongTimeout,
 		readLimit:    readLimit,
 		handlers:     make(map[string]func(context.Context, json.RawMessage) (json.RawMessage, error)),
 		handlerSlots: make(chan struct{}, maxConcurrentHandlers),
@@ -665,7 +784,7 @@ func (s *Station) dial(ctx context.Context) (*stationConn, error) {
 		return nil, err
 	}
 	conn.SetReadLimit(s.readLimit)
-	return newStationConn(ctx, conn, s.writeTimeout), nil
+	return newStationConn(ctx, conn, s.writeTimeout, s.pongTimeout), nil
 }
 
 // runConnection runs the read loop until it exits on its own (connection
@@ -685,6 +804,9 @@ func (s *Station) runConnection(ctx context.Context, conn *stationConn) (err err
 		}
 	}()
 	defer close(done)
+	// Tied to this connection, not to the Station: pingLoop exits when the
+	// connection closes, and the next reconnect starts a fresh one.
+	go conn.pingLoop(s.pingInterval)
 	// Run is typically launched by the caller as `go st.Run(ctx)`, with no
 	// recover of its own anywhere up that goroutine's stack — an
 	// unrecovered panic in readLoop (ReadMessage, Decode, ...) would crash
@@ -702,6 +824,18 @@ func (s *Station) readLoop(conn *stationConn) error {
 	for {
 		messageType, data, err := conn.conn.ReadMessage()
 		if err != nil {
+			// With PongTimeout enabled, an expired read deadline surfaces
+			// here as an ordinary net timeout. Naming it ErrPongTimeout
+			// (matching csms.Server.readLoop) lets OnDisconnect tell "the
+			// CSMS went silent" apart from a socket the CSMS actively
+			// closed, which are very different things to alert on.
+			var netErr net.Error
+			if conn.pongTimeout > 0 && errors.As(err, &netErr) && netErr.Timeout() {
+				return fmt.Errorf("%w: %v", ErrPongTimeout, err)
+			}
+			return err
+		}
+		if err := conn.touchReadDeadline(); err != nil {
 			return err
 		}
 		if messageType != websocket.TextMessage {

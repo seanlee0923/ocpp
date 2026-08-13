@@ -707,7 +707,37 @@ confirmation, err := station.Call[v16.BootNotificationRequest, v16.BootNotificat
 Handlers registered via `station.Handle` survive reconnects. A pending Call
 on a connection that drops fails immediately (no offline queueing). Basic
 Auth/TLS (including mTLS) are configured via `Config.BasicAuth`/
-`Config.TLSConfig`. Running many chargers is the caller's responsibility —
+`Config.TLSConfig`.
+
+### Keepalive
+
+`Config.PingInterval` makes the station originate WebSocket pings.
+`Config.PongTimeout` closes the connection with `station.ErrPongTimeout` — and
+hands it to `ReconnectPolicy` like any other failure — if the CSMS sends
+nothing at all for that long. Both default to 0 (disabled); when both are set,
+`PongTimeout` must be greater than `PingInterval`.
+
+```go
+st, err := station.New(station.Config{
+    URL: "wss://csms.example.com", Identity: "STATION-01", Version: protocol.OCPP16,
+    PingInterval: 30 * time.Second, // the station pings first
+    PongTimeout:  90 * time.Second, // drop and reconnect if the CSMS goes quiet
+})
+```
+
+`PongTimeout` is reset by **any** inbound frame — an OCPP message, a ping from
+the CSMS, or a pong — so it measures "the CSMS has gone quiet" rather than "a
+pong went missing". Against a CSMS that pings its clients, enabling
+`PongTimeout` alone is enough for half-open detection.
+
+> **A WebSocket ping is not an OCPP Heartbeat.** A CSMS enforcing an
+> OCPP-level idle timeout (this library's own `csms.Config.IdleTimeout` is one
+> such implementation, and it does **not** count pongs as activity) is not
+> satisfied by ping/pong. Send a real Heartbeat with `station.Call` on the
+> interval the BootNotification confirmation returned — that is application
+> territory, not the library's.
+
+Running many chargers is the caller's responsibility —
 keep your own `map[string]*station.Station`; this package only owns
 protocol/session mechanics. See
 [`examples/station-client`](examples/station-client).

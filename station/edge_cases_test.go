@@ -33,6 +33,12 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"negative MaxConcurrentHandlers": func(c station.Config) station.Config { c.MaxConcurrentHandlers = -1; return c },
 		"negative HandshakeTimeout":      func(c station.Config) station.Config { c.HandshakeTimeout = -time.Second; return c },
 		"negative ReadLimit":             func(c station.Config) station.Config { c.ReadLimit = -1; return c },
+		"negative PingInterval":          func(c station.Config) station.Config { c.PingInterval = -time.Second; return c },
+		"negative PongTimeout":           func(c station.Config) station.Config { c.PongTimeout = -time.Second; return c },
+		"PongTimeout not above PingInterval": func(c station.Config) station.Config {
+			c.PingInterval, c.PongTimeout = 30*time.Second, 30*time.Second
+			return c
+		},
 		"negative reconnect delay": func(c station.Config) station.Config {
 			c.ReconnectPolicy = &station.ReconnectPolicy{InitialDelay: -time.Second}
 			return c

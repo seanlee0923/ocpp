@@ -11,6 +11,22 @@ the same major version.
 
 ### Added
 
+- Added `PingInterval` and `PongTimeout` to `station.Config`. Keepalive was
+  configurable on the `csms` side only; `station` never even set a read
+  deadline, leaving a client with no way to detect a CSMS that does not ping
+  or one that went half-open. `PingInterval` makes the station originate
+  WebSocket pings, and `PongTimeout` closes the connection with the new
+  `station.ErrPongTimeout` sentinel — feeding the existing `ReconnectPolicy`
+  — when the CSMS sends no frame at all for that long. Both default to 0
+  (disabled), so existing behavior is unchanged; setting both requires
+  `PongTimeout > PingInterval`, mirroring the same check in `csms`. Unlike
+  `csms`, whose read deadline is extended by pongs only, `PongTimeout` is
+  reset by any inbound frame (OCPP message, ping, or pong), so it measures
+  "the CSMS has gone quiet" and is usable without `PingInterval`. A
+  WebSocket ping is not an OCPP Heartbeat and does not satisfy a CSMS's
+  OCPP-level idle timeout (including `csms.Config.IdleTimeout`, which does
+  not count pongs as activity) — now documented in the README and sessions
+  docs in both languages.
 - Added a `Header http.Header` field to `AuthenticationRequest` and
   `HandshakeAttempt`, exposing the WebSocket upgrade request's headers as-is.
   Behind a reverse proxy or Ingress controller, `RemoteAddr` is always the

@@ -11,6 +11,20 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
 
 ### Added
 
+- `station.Config`에 `PingInterval`/`PongTimeout` 추가 — 지금까지 keepalive
+  설정은 `csms` 쪽에만 있었고 `station`은 read deadline조차 설정하지 않아,
+  ping을 보내지 않는 CSMS나 조용히 죽은(half-open) CSMS를 클라이언트가 감지할
+  방법이 없었다. `PingInterval`은 station이 직접 WebSocket ping을 보내게 하고,
+  `PongTimeout`은 CSMS가 그동안 아무 frame도 보내지 않으면 연결을 새 sentinel
+  `station.ErrPongTimeout`으로 끊어 기존 `ReconnectPolicy`에 태운다. 둘 다
+  기본값 0(비활성)이라 기존 동작은 그대로이며, 함께 설정하면
+  `PongTimeout > PingInterval`을 요구한다(`csms`의 동일 검사와 대칭).
+  `PongTimeout`은 pong뿐 아니라 OCPP 메시지와 CSMS가 보낸 ping으로도 갱신되므로
+  "CSMS가 조용해졌다"를 측정하며, 그 덕에 `PingInterval` 없이 단독으로도 쓸 수
+  있다(`csms`의 pong 전용 갱신과 의도적으로 다른 점). WebSocket ping은 OCPP
+  Heartbeat이 아니므로 CSMS의 OCPP 레벨 idle timeout(`csms.Config.IdleTimeout`
+  포함 — pong을 활동으로 세지 않는다)을 만족시키지 못한다는 점을 README와
+  sessions 문서 한/영에 명시했다.
 - `AuthenticationRequest`/`HandshakeAttempt`에 `Header http.Header` 필드
   추가 — WebSocket upgrade 요청의 header를 그대로 노출한다. 리버스 프록시나
   Ingress controller 뒤에 배포된 경우 `RemoteAddr`는 항상 프록시 자신의

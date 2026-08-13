@@ -36,7 +36,13 @@ OnDuplicateSession: func(ctx context.Context, attempt csms.DuplicateSessionAttem
 제거되지 않는다 — `OnConnect`/`OnDisconnect`/`OnDuplicateSession`은 모두 빠르게 반환해야
 하며, 오래 걸리는 작업은 별도 goroutine으로 넘겨야 한다.
 
-`PingInterval`, `PongTimeout`, `IdleTimeout`으로 연결 상태를 관리한다. `Session.Done()`은
+`PingInterval`, `PongTimeout`, `IdleTimeout`으로 연결 상태를 관리한다. 셋의 판정 기준은
+서로 다르다. `PingInterval`은 서버가 WebSocket ping을 보내는 주기이고, `PongTimeout`은 그
+pong이 오지 않을 때의 read deadline이며, `IdleTimeout`은 **OCPP 메시지** 기준 무통신
+시간이다. 즉 `IdleTimeout`은 pong을 활동으로 세지 않으므로, ping/pong은 정상이지만
+Heartbeat 같은 OCPP 메시지를 전혀 보내지 않는 충전소는 `ErrIdleTimeout`으로 종료된다 —
+이는 "WebSocket은 살아 있으나 OCPP 레벨에서는 죽은" 연결을 걸러내기 위한 의도된 동작이다.
+클라이언트 쪽 대응 설정은 `station.Config.PingInterval`/`PongTimeout`이다. `Session.Done()`은
 종료 시 닫히고 `Session.Err()`에 원인이 남는다. `Session.Context()`는 handler와 background
 작업의 취소 기준으로 사용할 수 있다.
 
