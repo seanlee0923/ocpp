@@ -45,6 +45,11 @@ the same major version.
   OCPP-level idle timeout (including `csms.Config.IdleTimeout`, which does
   not count pongs as activity) — now documented in the README and sessions
   docs in both languages.
+
+## [0.2.1] - 2026-07-30
+
+### Added
+
 - Added a `Header http.Header` field to `AuthenticationRequest` and
   `HandshakeAttempt`, exposing the WebSocket upgrade request's headers as-is.
   Behind a reverse proxy or Ingress controller, `RemoteAddr` is always the
@@ -286,6 +291,7 @@ layer.
   helper (`callBooted`). Public method names, signatures, and behavior are
   unchanged.
 
-[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/seanlee0923/ocpp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/seanlee0923/ocpp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/seanlee0923/ocpp/releases/tag/v0.1.0

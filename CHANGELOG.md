@@ -41,6 +41,11 @@ note를 통한 API 변경을 허용하며, `v1`부터 같은 major 내 source co
   Heartbeat이 아니므로 CSMS의 OCPP 레벨 idle timeout(`csms.Config.IdleTimeout`
   포함 — pong을 활동으로 세지 않는다)을 만족시키지 못한다는 점을 README와
   sessions 문서 한/영에 명시했다.
+
+## [0.2.1] - 2026-07-30
+
+### Added
+
 - `AuthenticationRequest`/`HandshakeAttempt`에 `Header http.Header` 필드
   추가 — WebSocket upgrade 요청의 header를 그대로 노출한다. 리버스 프록시나
   Ingress controller 뒤에 배포된 경우 `RemoteAddr`는 항상 프록시 자신의
@@ -248,6 +253,7 @@ OCPP 2.1(Edition 2)을 하나의 전송 계층에서 지원합니다.
   공통 제네릭 헬퍼(`callBooted`)로 정리. 공개 메서드 이름·시그니처와 동작은
   변경되지 않았다.
 
-[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/seanlee0923/ocpp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/seanlee0923/ocpp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/seanlee0923/ocpp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/seanlee0923/ocpp/releases/tag/v0.1.0
