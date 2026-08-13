@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -198,10 +199,14 @@ func (s *Session) send(ctx context.Context, message protocol.Message) error {
 	default:
 	}
 	deadline, hasDeadline := ctx.Deadline()
+	// Whether the deadline actually handed to the socket is ctx's own, which
+	// decides how to report a timeout from it below.
+	deadlineFromCtx := hasDeadline
 	if s.writeTimeout > 0 {
 		configured := time.Now().Add(s.writeTimeout)
 		if !hasDeadline || configured.Before(deadline) {
 			deadline, hasDeadline = configured, true
+			deadlineFromCtx = false
 		}
 	}
 	if hasDeadline {
@@ -212,10 +217,40 @@ func (s *Session) send(ctx context.Context, message protocol.Message) error {
 		_ = s.conn.SetWriteDeadline(time.Time{})
 	}
 	if err := s.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		return err
+		// The deadline this write was given is ctx's own whenever ctx's is
+		// the sooner of the two, so ctx expiring mid-write surfaces here as
+		// a plain net timeout — "writev tcp ...: i/o timeout" — with
+		// nothing tying it back to the caller's context. Returned as-is, a
+		// caller's errors.Is(err, context.DeadlineExceeded) says false for
+		// what is precisely their deadline expiring, and it contradicts the
+		// outbound-call metric, which classifyContextOutcome already derives
+		// from ctx.Err(). Report the context's own error, keeping the
+		// transport detail in the message.
+		return ctxWriteError(ctx, deadlineFromCtx, err)
 	}
 	s.markSent()
 	return nil
+}
+
+// ctxWriteError maps a failed write back onto the caller's context when the
+// context is what ended it.
+//
+// Checking ctx.Err() alone is not enough. When the socket deadline was taken
+// from ctx, both it and ctx's own timer are armed for the same instant, and
+// the socket routinely wins the race by microseconds — so ctx.Err() is still
+// nil at the moment WriteMessage reports "i/o timeout", even though that
+// timeout *is* the caller's deadline expiring. deadlineFromCtx records that
+// the deadline in play came from ctx, which makes a timeout from it
+// unambiguously attributable to the caller's deadline.
+func ctxWriteError(ctx context.Context, deadlineFromCtx bool, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("%w: %v", ctxErr, err)
+	}
+	var netErr net.Error
+	if deadlineFromCtx && errors.As(err, &netErr) && netErr.Timeout() {
+		return fmt.Errorf("%w: %v", context.DeadlineExceeded, err)
+	}
+	return err
 }
 
 func (s *Session) result(ctx context.Context, id string, payload any) error {

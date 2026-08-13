@@ -9,6 +9,24 @@ the same major version.
 
 ## [Unreleased]
 
+### Fixed
+
+- `csms.Call`/`station.Call` returned a raw net error
+  (`writev tcp ...: i/o timeout`) for a write that failed because the caller's
+  ctx deadline expired. Whenever ctx's deadline is sooner than `WriteTimeout`,
+  that deadline *is* the socket write deadline, so a timeout from it is
+  precisely the caller's deadline expiring — yet
+  `errors.Is(err, context.DeadlineExceeded)` was false. The outbound-call
+  metric already classified it from `classifyContextOutcome(callCtx.Err())` and
+  reported `MetricOutboundCallTimeout`, so the error and the metric described
+  the same event differently. A failed write whose context has ended is now
+  wrapped in that context's error, with the transport detail kept in the
+  message. Consulting `ctx.Err()` alone is not enough: the socket deadline and
+  ctx's timer are armed for the same instant and the socket routinely wins by
+  microseconds, leaving `ctx.Err()` nil at that moment — so where the deadline
+  came from is tracked as well. This mismatch was intermittently breaking CI
+  (`TestOutboundCallTimeoutEmitsMetric` failing under the coverage job's load).
+
 ### Added
 
 - Added `PingInterval` and `PongTimeout` to `station.Config`. Keepalive was

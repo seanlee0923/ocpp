@@ -516,10 +516,14 @@ func (c *stationConn) send(ctx context.Context, message protocol.Message) error 
 	default:
 	}
 	deadline, hasDeadline := ctx.Deadline()
+	// Whether the deadline actually handed to the socket is ctx's own, which
+	// decides how to report a timeout from it below.
+	deadlineFromCtx := hasDeadline
 	if c.writeTimeout > 0 {
 		configured := time.Now().Add(c.writeTimeout)
 		if !hasDeadline || configured.Before(deadline) {
 			deadline, hasDeadline = configured, true
+			deadlineFromCtx = false
 		}
 	}
 	if hasDeadline {
@@ -529,7 +533,36 @@ func (c *stationConn) send(ctx context.Context, message protocol.Message) error 
 	} else {
 		_ = c.conn.SetWriteDeadline(time.Time{})
 	}
-	return c.conn.WriteMessage(websocket.TextMessage, data)
+	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		// Mirrors csms.Session.send: a deadline taken from ctx expiring
+		// mid-write surfaces as a plain net timeout, so report the
+		// context's own error and keep the transport detail in the message.
+		// Without this, a caller's errors.Is(err, context.DeadlineExceeded)
+		// is false for exactly their own deadline expiring.
+		return ctxWriteError(ctx, deadlineFromCtx, err)
+	}
+	return nil
+}
+
+// ctxWriteError maps a failed write back onto the caller's context when the
+// context is what ended it.
+//
+// Checking ctx.Err() alone is not enough. When the socket deadline was taken
+// from ctx, both it and ctx's own timer are armed for the same instant, and
+// the socket routinely wins the race by microseconds — so ctx.Err() is still
+// nil at the moment WriteMessage reports "i/o timeout", even though that
+// timeout *is* the caller's deadline expiring. deadlineFromCtx records that
+// the deadline in play came from ctx, which makes a timeout from it
+// unambiguously attributable to the caller's deadline.
+func ctxWriteError(ctx context.Context, deadlineFromCtx bool, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("%w: %v", ctxErr, err)
+	}
+	var netErr net.Error
+	if deadlineFromCtx && errors.As(err, &netErr) && netErr.Timeout() {
+		return fmt.Errorf("%w: %v", context.DeadlineExceeded, err)
+	}
+	return err
 }
 
 // Station is a long-lived, reconnecting OCPP-J Charging Station client.

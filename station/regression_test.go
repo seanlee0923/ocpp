@@ -1160,6 +1160,78 @@ func TestStationCallWriteHonorsContextTimeout(t *testing.T) {
 	}
 }
 
+// TestStationCallReportsContextDeadlineWhenWriteTimesOut is the station-side
+// mirror of csms's TestCallReportsContextDeadlineWhenWriteTimesOut: when ctx's
+// own deadline is the one handed to the socket, a write that blocks past it
+// must be reported as context.DeadlineExceeded, not as the bare
+// "i/o timeout" net error the socket produces. A caller cannot otherwise tell
+// their own deadline being too short apart from a broken connection.
+//
+// Note the socket deadline and ctx's timer are armed for the same instant, and
+// the socket usually wins by microseconds — so ctx.Err() is typically still
+// nil right when the write fails, which is why send tracks where the deadline
+// came from instead of only consulting ctx.Err().
+func TestStationCallReportsContextDeadlineWhenWriteTimesOut(t *testing.T) {
+	lc := net.ListenConfig{Control: func(_, _ string, c syscall.RawConn) error {
+		var sockErr error
+		if err := c.Control(func(fd uintptr) {
+			sockErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_RCVBUF, 1024)
+		}); err != nil {
+			return err
+		}
+		return sockErr
+	}}
+	listener, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	upgrader := websocket.Upgrader{}
+	accepted := make(chan *websocket.Conn, 1)
+	testServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		accepted <- conn
+		// No read loop: nothing ever drains what the station writes.
+	}))
+	testServer.Listener.Close()
+	testServer.Listener = listener
+	testServer.Start()
+	defer testServer.Close()
+
+	st, err := station.New(station.Config{
+		URL: wsURL(testServer.URL), Identity: "CP-001", Version: protocol.OCPP16,
+		WriteTimeout: 30 * time.Second, // far longer than ctx's, so ctx's deadline is the one that fires
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runInBackground(t, st)
+	waitConnected(t, st)
+
+	conn := <-accepted
+	defer conn.Close()
+
+	// 1MB: enough to fill the shrunken receive window, but small enough that
+	// marshaling it stays far below ctx's deadline — with a much larger
+	// payload the deadline expires during marshaling instead, and send's
+	// pre-write ctx check returns before the write path under test runs.
+	large := strings.Repeat("x", 1<<20)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, err = station.Call[v16.DataTransferRequest, v16.DataTransferConfirmation](
+		ctx, st, v16.DataTransferRequest{VendorID: "test", Data: &large},
+	)
+	if err == nil {
+		t.Fatal("Call succeeded even though the CSMS never read anything off the wire")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+}
+
 func TestStationBoundsConcurrentHandlers(t *testing.T) {
 	const limit = 2
 
